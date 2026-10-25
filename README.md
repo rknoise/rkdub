@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.png" alt="rkdub" width="220"></p>
 
-# rkdub – helyi magyar szinkron
+# rkdubby – helyi magyar szinkron
 
 > **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU, in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer.
 
