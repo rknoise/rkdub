@@ -102,9 +102,38 @@ function fillSelect(id, items, value) {
     if (value !== undefined && value !== null) $(id).value = value;
 }
 
+// Ollama-modell: amíg az Ollama el nem indul, a lista üres; addig a mentett választás marad érvényben
+let savedModel = "";
+let modelsLoaded = false;
+
+function fillModels(models, def, starting) {
+    if (models.length) {
+        const want = models.includes(savedModel) ? savedModel : def;
+        fillSelect("ollama_model", models.map((m) => [m, m === def ? m + " (ajánlott)" : m]), want);
+        modelsLoaded = true;
+        return true;
+    }
+    const label = savedModel ? `${savedModel} (az Ollama ${starting ? "indul…" : "még nem fut"})`
+        : `Automatikus (az Ollama ${starting ? "indul…" : "még nem fut"})`;
+    fillSelect("ollama_model", [["", label]], "");
+    modelsLoaded = false;
+    return false;
+}
+
+async function waitModels(n = 0) {
+    if (modelsLoaded || n > 40) return;
+    try {
+        const d = await api("/api/models");
+        if (fillModels(d.models, d.default, d.starting)) return;
+    } catch { }
+    setTimeout(() => waitModels(n + 1), 3000);
+}
+
 function options() {
     const o = {};
     for (const id of ["translator", "ollama_model", "deepl_key", "formality", "ref_mode", "asr_model", "notes"]) o[id] = $(id).value;
+    if (modelsLoaded) savedModel = o.ollama_model;
+    else o.ollama_model = savedModel;          // a "még nem fut" sor ne írja felül a mentett modellt
     o.num_speakers = parseInt($("num_speakers").value || "0", 10);
     o.speaker_genders = o.num_speakers ? genders.slice(0, o.num_speakers) : [];
     o.tempo = parseFloat($("tempo").value);
@@ -186,8 +215,8 @@ async function init() {
     fillSelect("asr_model", d.choices.asr_model, s.asr_model);
     fillSelect("translator", d.choices.translator, s.translator);
     fillSelect("formality", d.choices.formality, s.formality);
-    const models = d.models.length ? d.models.map((m) => [m, m]) : [["", "(az Ollama nem fut, vagy nincs modell)"]];
-    fillSelect("ollama_model", models, s.ollama_model || "");
+    savedModel = s.ollama_model || "";
+    if (!fillModels(d.models, d.model_default, d.ollama_starting)) waitModels();
     $("deepl_key").value = s.deepl_key || "";
     $("num_speakers").value = String(s.num_speakers || 0);
     genders = Array.isArray(s.speaker_genders) ? s.speaker_genders.slice() : [];

@@ -143,14 +143,47 @@ def index():
 
 # --- beállítások, állapot ------------------------------------------------------------
 
+_ollama_starting = threading.Event()
+
+
+def _start_ollama_bg():
+    """Az Ollama elindítása a háttérben, ha nem fut: így a felület modellistája is megtelik, nem csak a
+    szinkron indításakor derül ki, melyik modell lesz."""
+    if _ollama_starting.is_set():
+        return
+    _ollama_starting.set()
+
+    def run():
+        try:
+            tr.ensure_ollama(lambda m: None)
+        finally:
+            _ollama_starting.clear()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _model_info():
+    models = tr.ollama_models()
+    if not models and S.settings.get("translator", "ollama") == "ollama":
+        _start_ollama_bg()
+    return {"models": models, "default": tr.pick_default_model(models), "starting": _ollama_starting.is_set()}
+
+
+@app.get("/api/models")
+def api_models():
+    return _model_info()
+
+
 @app.get("/api/init")
 def api_init():
-    models = tr.ollama_models()
+    mi = _model_info()
     s = dict(S.settings)
-    if s.get("ollama_model") not in models:
-        s["ollama_model"] = tr.pick_default_model(models)
+    if mi["models"] and s.get("ollama_model") not in mi["models"]:
+        s["ollama_model"] = mi["default"]
+    # ha még nem fut az Ollama, a mentett választás marad (nem írjuk felül üressel)
     s["deepl_key"] = tr.load_deepl_key(s)
-    return {"settings": {k: s.get(k) for k in OPTION_KEYS}, "models": models, "version": __version__,
+    return {"settings": {k: s.get(k) for k in OPTION_KEYS}, "models": mi["models"], "model_default": mi["default"],
+            "ollama_starting": mi["starting"], "version": __version__,
             "choices": {"translator": TRANSLATORS, "formality": FORMALITY, "ref_mode": REF_MODES,
                         "asr_model": ASR_MODELS}, "gpu": gpu_info()}
 
