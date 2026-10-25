@@ -1,0 +1,3 @@
+# a .bat fajlok maradjanak CRLF sorvegesek (a Windows cmd.exe-nek kell), a git ne alakitsa at oket
+*.bat -text
+*.ps1 -text

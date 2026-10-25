@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rkdub — magyar szinkron</title>
+    <link rel="icon" href="/static/rkdub.png">
+    <!-- A Tailwind és a Lucide helyben van (internet nélkül is működik); a betűtípus netről jön, ha van -->
+    <script src="/static/tailwind.js"></script>
+    <script src="/static/lucide.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { 50: '#fff7ed', 100: '#ffedd5', 300: '#ffb070', 400: '#ff8a2a', 500: '#ff6b00', 600: '#ea580c', 700: '#c2410c',
+                                 glow: 'rgba(255, 107, 0, 0.35)' },
+                        dark: { base: '#07090e', card: '#0d1119', border: '#1e2533', hover: '#151b27', terminal: '#05070b' }
+                    },
+                    fontFamily: {
+                        sans: ['Barlow', 'Segoe UI', 'sans-serif'],
+                        head: ['Barlow Semi Condensed', 'Barlow', 'Segoe UI', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'Consolas', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root { --o: #ff6b00; --o2: #ff8a2a; --panel-a: #0d1119; --panel-b: #080b11; }
+        html, body { background: #05070b; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #07090e; }
+        ::-webkit-scrollbar-thumb { background: #232b3b; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--o); }
+        select, input, textarea { color-scheme: dark; }
+        textarea.cell { resize: none; overflow: hidden; line-height: 1.45; }
+        .dirty { border-color: rgba(255, 107, 0, 0.75) !important; }
+        .modal { background: rgba(3, 5, 9, 0.75); backdrop-filter: blur(5px); }
+        .row-playing { background: rgba(255, 107, 0, 0.07); }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* háttér: sötét kő, izzó repedések */
+        #bg-art { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+        #bg-art svg { width: 100%; height: 100%; }
+
+        /* keretes panel: levágott sarkok, izzó narancs szegély */
+        .hud { position: relative; isolation: isolate; padding: 20px 22px; --c: 18px; }
+        .hud-edge { position: absolute; inset: 0; z-index: -1; pointer-events: none;
+            filter: drop-shadow(0 0 5px rgba(255, 107, 0, 0.45)) drop-shadow(0 0 18px rgba(255, 90, 0, 0.12)); }
+        .hud-edge::before, .hud-edge::after { content: ""; position: absolute;
+            clip-path: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c)); }
+        .hud-edge::before { inset: 0;
+            background: linear-gradient(135deg, #ff8a2a 0%, rgba(255, 107, 0, 0.55) 10%, rgba(255, 107, 0, 0.16) 30%,
+                        rgba(255, 107, 0, 0.12) 55%, rgba(255, 107, 0, 0.3) 85%, #ff7a1a 100%); }
+        .hud-edge::after { inset: 1.5px; background: linear-gradient(180deg, var(--panel-a), var(--panel-b));
+            clip-path: polygon(calc(var(--c) - 0.6px) 0, 100% 0, 100% calc(100% - var(--c) + 0.6px), calc(100% - var(--c) + 0.6px) 100%, 0 100%, 0 calc(var(--c) - 0.6px)); }
+        .hud-title { font-family: 'Barlow Semi Condensed', 'Barlow', 'Segoe UI', sans-serif; letter-spacing: .01em; }
+        .ico-box { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+            color: var(--o2); border: 1.5px solid rgba(255, 122, 26, 0.65); background: rgba(255, 107, 0, 0.06);
+            box-shadow: 0 0 12px -2px rgba(255, 107, 0, 0.45), inset 0 0 8px rgba(255, 107, 0, 0.12); flex-shrink: 0; }
+
+        /* mezők */
+        .fld { width: 100%; background: #0a0d14; border: 1px solid #262e3d; border-radius: 9px; color: #e5e7eb;
+            font-size: 14px; padding: 10px 14px; transition: border-color .15s, box-shadow .15s; }
+        .fld:hover { border-color: #39435a; }
+        .fld:focus { outline: none; border-color: var(--o); box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.15); }
+        select.fld { appearance: none; padding-right: 38px; cursor: pointer;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23d1d5db' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 12px center; }
+        .lbl { display: block; font-size: 14px; color: #c7ccd6; margin-bottom: 6px; font-weight: 500; }
+
+        /* csúszkák: narancs kitöltés a hüvelykujjig (--p a JS-ből) */
+        input.rng { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 9999px; cursor: pointer;
+            background: linear-gradient(90deg, var(--o) 0, var(--o2) var(--p, 0%), #262e3d var(--p, 0%)); }
+        input.rng::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 9999px;
+            background: radial-gradient(circle at 35% 35%, #ffb070, #ff6b00 60%); border: 2px solid #ffd3ad;
+            box-shadow: 0 0 0 4px rgba(255, 107, 0, .18), 0 0 14px rgba(255, 107, 0, .8); }
+        input.rng.sm::-webkit-slider-thumb { width: 12px; height: 12px; border-width: 1.5px; box-shadow: 0 0 8px rgba(255, 107, 0, .8); }
+        .ticks { position: relative; height: 16px; margin-top: 8px; }
+        .ticks span { position: absolute; transform: translateX(-50%); font-size: 11px; color: #6b7280; font-family: 'JetBrains Mono', monospace; }
+        .ticks span.on { color: var(--o2); font-weight: 600; }
+
+        /* gombok */
+        .btn-go { background: linear-gradient(180deg, #ff8a2a, #ff6b00 45%, #e65500); color: #fff; font-weight: 700;
+            box-shadow: 0 0 0 1px rgba(255, 170, 100, .5) inset, 0 0 24px -2px rgba(255, 107, 0, .65), 0 8px 24px -8px rgba(255, 80, 0, .7);
+            clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); transition: filter .15s, transform .1s; }
+        .btn-go:hover { filter: brightness(1.08); }
+        .btn-go:active { transform: scale(.99); }
+        .btn-go:disabled { filter: grayscale(.6) brightness(.7); cursor: not-allowed; }
+        .btn-ghost { background: rgba(13, 17, 25, .85); border: 1px solid #262e3d; color: #d1d5db; transition: all .15s; }
+        .btn-ghost:hover { border-color: rgba(255, 122, 26, .5); color: #fff; background: rgba(255, 107, 0, .06); }
+        .seg-on { background: linear-gradient(180deg, #ff8a2a, #ff6b00); color: #fff; font-weight: 600; box-shadow: 0 0 14px -2px rgba(255, 107, 0, .7); }
+        .seg-off { color: #c7ccd6; }
+        .seg-off:hover { color: #fff; }
+
+        /* lejátszó */
+        #stage { background: radial-gradient(ellipse at 50% 40%, #151a24 0%, #07090d 70%); }
+        #stage:fullscreen { border-radius: 0; }
+        .pl-btn { color: #e5e7eb; padding: 6px; border-radius: 8px; transition: color .15s, background .15s; }
+        .pl-btn:hover { color: var(--o2); background: rgba(255, 255, 255, .05); }
+        .ring-glow { box-shadow: 0 0 0 1.5px rgba(255, 122, 26, .7), 0 0 26px -2px rgba(255, 107, 0, .55), inset 0 0 18px rgba(255, 107, 0, .15); }
+    </style>
+</head>
+<body class="text-gray-200 font-sans min-h-screen flex flex-col selection:bg-brand-500 selection:text-white antialiased">
+
+    <!-- háttér -->
+    <div id="bg-art" aria-hidden="true">
+        <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <radialGradient id="g1" cx="0" cy="1" r="0.55"><stop offset="0" stop-color="#ff5a00" stop-opacity=".30"/><stop offset="1" stop-color="#ff5a00" stop-opacity="0"/></radialGradient>
+                <radialGradient id="g2" cx="1" cy="0.45" r="0.45"><stop offset="0" stop-color="#ff6b00" stop-opacity=".22"/><stop offset="1" stop-color="#ff6b00" stop-opacity="0"/></radialGradient>
+                <radialGradient id="g3" cx="0.95" cy="0" r="0.35"><stop offset="0" stop-color="#ff7a1a" stop-opacity=".18"/><stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/></radialGradient>
+                <radialGradient id="g4" cx="0.5" cy="0.5" r="0.7"><stop offset="0" stop-color="#0b0f17"/><stop offset="1" stop-color="#040508"/></radialGradient>
+                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .05 0"/></filter>
+            </defs>
+            <rect width="1600" height="900" fill="url(#g4)"/>
+            <rect width="1600" height="900" filter="url(#grain)"/>
+            <rect width="1600" height="900" fill="url(#g1)"/>
+            <rect width="1600" height="900" fill="url(#g2)"/>
+            <rect width="1600" height="900" fill="url(#g3)"/>
+            <g fill="none" stroke="#ff7a1a" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+                <!-- bal alsó repedések -->
+                <path d="M0 760 L40 742 L62 760 L110 728 L138 745 L190 700 L236 712 L268 676" stroke-width="2.2" opacity=".75"/>
+                <path d="M110 728 L120 770 L160 790 L172 840 L214 870 L230 900" stroke-width="1.6" opacity=".6"/>
+                <path d="M0 842 L52 826 L88 846 L126 812" stroke-width="1.4" opacity=".55"/>
+                <path d="M190 700 L178 650 L206 610 L196 566" stroke-width="1.2" opacity=".45"/>
+                <path d="M30 600 L58 620 L50 668 L76 700" stroke-width="1" opacity=".35"/>
+                <!-- jobb oldali repedések -->
+                <path d="M1600 210 L1562 236 L1576 280 L1534 318 L1550 372 L1508 410 L1522 470" stroke-width="2" opacity=".7"/>
+                <path d="M1534 318 L1490 300 L1462 330 L1420 318" stroke-width="1.3" opacity=".5"/>
+                <path d="M1600 560 L1570 590 L1586 640 L1548 690 L1566 740 L1530 790 L1544 900" stroke-width="1.8" opacity=".6"/>
+                <path d="M1548 690 L1506 676 L1478 712" stroke-width="1.1" opacity=".45"/>
+                <path d="M1440 0 L1458 40 L1430 80 L1452 120" stroke-width="1.2" opacity=".45"/>
+                <!-- lent középen: hangjel -->
+                <path d="M620 868 L780 868 L800 852 L816 880 L836 818 L858 884 L876 846 L892 872 L910 860 L928 868 L1120 868" stroke-width="2" opacity=".8"/>
+            </g>
+        </svg>
+    </div>
+
+    <!-- Fejléc -->
+    <header class="relative z-10 px-4 md:px-8 pt-5 pb-5">
+        <div class="max-w-[1640px] mx-auto flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-4 min-w-0">
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 via-brand-500 to-orange-700 flex items-center justify-center text-white shrink-0"
+                     style="box-shadow: 0 0 0 1px rgba(255,190,140,.45) inset, 0 0 28px -2px rgba(255,107,0,.75)">
+                    <i data-lucide="mic" class="w-7 h-7"></i>
+                </div>
+                <div class="min-w-0">
+                    <div class="flex items-center gap-3">
+                        <h1 class="font-head font-bold text-3xl text-white tracking-tight leading-none">rkdub</h1>
+                        <span class="text-sm px-2.5 py-0.5 rounded-md bg-brand-500/15 text-brand-400 font-semibold border border-brand-500/30">magyar szinkron</span>
+                    </div>
+                    <p class="text-sm text-gray-300 mt-1">Helyi AI szinkron az eredeti beszélők hangján, közvetlenül a videókártyádon</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-stretch gap-3">
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-3 bg-dark-card/90 border border-dark-border rounded-xl px-5 py-3 shadow-lg shadow-black/40">
+                    <div class="flex items-center gap-3">
+                        <i data-lucide="cpu" class="w-7 h-7 text-brand-400"></i>
+                        <div>
+                            <div id="gpu-name" class="text-[11px] text-gray-300 uppercase tracking-wide font-semibold">GPU</div>
+                            <div class="flex items-center gap-2">
+                                <span id="gpu-util" class="text-sm font-mono text-white font-semibold w-9">–</span>
+                                <svg id="gpu-spark" width="86" height="20" viewBox="0 0 86 20" class="overflow-visible">
+                                    <defs><linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff6b00" stop-opacity=".45"/><stop offset="1" stop-color="#ff6b00" stop-opacity="0"/></linearGradient></defs>
+                                    <path id="spark-area" fill="url(#spark-fill)" d=""/>
+                                    <path id="spark-line" fill="none" stroke="#ff8a2a" stroke-width="1.6" stroke-linejoin="round" d="" style="filter: drop-shadow(0 0 3px rgba(255,107,0,.8))"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hidden sm:block w-px self-stretch bg-dark-border"></div>
+                    <div class="flex items-center gap-3">
+                        <i data-lucide="memory-stick" class="w-7 h-7 text-emerald-400"></i>
+                        <div>
+                            <div class="text-[11px] text-gray-300 uppercase tracking-wide font-semibold">VRAM használat</div>
+                            <span id="gpu-mem" class="text-sm font-mono text-emerald-400 font-semibold">–</span>
+                            <div class="w-28 bg-dark-border rounded-full h-1 mt-1 overflow-hidden"><div id="vram-bar" class="h-1 bg-emerald-400 rounded-full transition-all duration-500" style="width:0%; box-shadow: 0 0 6px rgba(52,211,153,.8)"></div></div>
+                        </div>
+                    </div>
+                    <div class="hidden sm:block w-px self-stretch bg-dark-border"></div>
+                    <div class="flex items-center gap-3">
+                        <i id="gpu-temp-icon" data-lucide="thermometer" class="w-7 h-7 text-emerald-400"></i>
+                        <div>
+                            <div class="text-[11px] text-gray-300 uppercase tracking-wide font-semibold">Hőmérséklet</div>
+                            <span id="gpu-temp" class="text-sm font-mono text-emerald-400 font-semibold">–</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 bg-dark-card/90 border border-dark-border rounded-xl px-5 py-3 shadow-lg shadow-black/40 min-w-[150px]">
+                    <span class="relative flex h-3 w-3 shrink-0">
+                        <span id="status-ping" class="hidden absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                    </span>
+                    <span id="status-text" class="text-sm font-semibold text-white max-w-[260px] truncate">Kész / tétlen</span>
+                </div>
+            </div>
+        </div>
+        <!-- izzó vonal a fejléc alatt -->
+        <div class="absolute left-0 right-0 bottom-0 h-px" style="background: linear-gradient(90deg, transparent, rgba(255,107,0,.15) 15%, rgba(255,122,26,.8) 50%, rgba(255,107,0,.15) 85%, transparent); box-shadow: 0 0 10px rgba(255,107,0,.6)"></div>
+    </header>
+
+    <main class="relative z-10 flex-1 max-w-[1640px] w-full mx-auto px-3 md:px-8 py-6 space-y-7">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-7">
+
+            <!-- BAL OSZLOP: bemenet és beállítások -->
+            <div class="lg:col-span-5 space-y-7 min-w-0">
+
+                <section class="hud">
+                    <div class="hud-edge"></div>
+                    <div class="flex items-center justify-between gap-3 mb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="ico-box"><i data-lucide="file-video" class="w-5 h-5"></i></div>
+                            <h2 class="hud-title text-xl font-semibold text-brand-400">Bemeneti fájl</h2>
+                        </div>
+                        <span class="hidden xl:inline text-xs text-gray-400 font-medium">MP4, MKV, MOV, WEBM, MP3, WAV, M4A</span>
+                    </div>
+
+                    <div id="drop-zone" class="border border-dashed border-gray-600/60 hover:border-brand-500/70 hover:bg-brand-500/5 transition-all duration-200 rounded-xl px-6 py-6 text-center group cursor-pointer bg-black/20">
+                        <input type="file" id="file-input" class="hidden" accept="video/*,audio/*,.mkv" />
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 text-brand-400 ring-glow group-hover:scale-110 transition-transform bg-brand-500/5">
+                            <i data-lucide="upload-cloud" class="w-6 h-6"></i>
+                        </div>
+                        <p class="text-base font-semibold text-gray-100 mb-0.5">Húzd ide a videó- vagy hangfájlt</p>
+                        <p class="text-sm text-gray-400">vagy <span class="text-brand-400 underline underline-offset-2 font-medium">kattints a tallózáshoz</span></p>
+                        <div id="upload-progress" class="hidden mt-3">
+                            <div class="w-full bg-dark-border rounded-full h-1.5 overflow-hidden"><div id="upload-bar" class="bg-brand-500 h-1.5" style="width:0%"></div></div>
+                            <p id="upload-text" class="text-[11px] text-gray-400 mt-1 font-mono"></p>
+                        </div>
+                    </div>
+
+                    <div class="relative my-4">
+                        <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-dark-border"></div></div>
+                        <div class="relative flex justify-center"><span class="px-3 text-[11px] uppercase tracking-wider text-gray-500 font-mono" style="background: var(--panel-a)">vagy elérési út (nagy fájlnál gyorsabb)</span></div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <div class="relative flex-1 min-w-0">
+                            <i data-lucide="folder" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <input id="path" type="text" placeholder="pl. D:\Videók\film.mp4" class="fld !pl-10 font-mono !text-[13px]">
+                        </div>
+                        <button id="browse" class="btn-ghost shrink-0 px-4 rounded-[9px] text-sm font-medium flex items-center gap-2 !border-brand-500/40">
+                            <i data-lucide="folder-open" class="w-4 h-4 text-brand-400"></i><span>Tallózás</span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Beállítások -->
+                <section class="hud">
+                    <div class="hud-edge"></div>
+                    <button id="toggle-settings" class="w-full flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <div class="ico-box"><i data-lucide="sliders-vertical" class="w-5 h-5"></i></div>
+                            <h2 class="hud-title text-xl font-semibold text-brand-400">Szinkronizálási beállítások</h2>
+                        </div>
+                        <i data-lucide="chevron-down" id="settings-chevron" class="w-5 h-5 text-gray-300 transition-transform"></i>
+                    </button>
+
+                    <div id="settings-content" class="mt-5 space-y-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+                            <div>
+                                <label class="lbl" for="ref_mode">Hangklónozás / célhang</label>
+                                <select id="ref_mode" class="opt fld"></select>
+                            </div>
+                            <div>
+                                <label class="lbl" for="asr_model">Whisper-modell</label>
+                                <select id="asr_model" class="opt fld"></select>
+                            </div>
+                            <div>
+                                <label class="lbl" for="translator">Fordító</label>
+                                <select id="translator" class="opt fld"></select>
+                            </div>
+                            <div id="model-wrap">
+                                <label class="lbl" for="ollama_model">Helyi AI-modell (Ollama)</label>
+                                <select id="ollama_model" class="opt fld"></select>
+                            </div>
+                            <div id="deepl-wrap" class="hidden">
+                                <label class="lbl" for="deepl_key">DeepL-kulcs</label>
+                                <input id="deepl_key" type="password" class="opt fld font-mono">
+                            </div>
+                            <div>
+                                <label class="lbl" for="formality">Megszólítás</label>
+                                <select id="formality" class="opt fld"></select>
+                            </div>
+                        </div>
+
+                        <div class="bg-black/25 border border-dark-border rounded-xl px-4 pt-3 pb-3">
+                            <div class="flex justify-between items-baseline gap-3 mb-3">
+                                <span class="text-sm text-gray-200 font-medium" title="Ha tudod, hány szereplő beszél, add meg (és a nemüket): így pontosabb a szétválasztás, és minden szereplő végig ugyanazon a hangon szól">Szereplők száma <span class="text-gray-500 font-normal">(ha tudod, add meg)</span></span>
+                                <span id="spk-label" class="text-sm font-semibold text-brand-400">Automatikus</span>
+                            </div>
+                            <div class="px-[9px]">
+                                <input id="num_speakers" type="range" min="0" max="10" step="1" value="0" class="rng w-full">
+                                <div id="spk-ticks" class="ticks"></div>
+                            </div>
+                            <div id="genders" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2"></div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between items-baseline text-sm mb-3">
+                                <span class="text-gray-200 font-medium">Beszédtempó <span class="text-gray-500 font-normal">(a magyar hangé)</span></span>
+                                <span id="tempo-label" class="font-mono text-brand-400 font-semibold">1.00x (természetes)</span>
+                            </div>
+                            <div class="px-[9px]">
+                                <input id="tempo" type="range" min="0.85" max="1.15" step="0.05" value="1.0" class="opt rng w-full">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="lbl" for="notes">Megjegyzés a fordítónak <span class="text-gray-500 font-normal">(nem kötelező)</span></label>
+                            <div class="flex gap-3 items-start">
+                                <textarea id="notes" rows="1" placeholder="pl. Főzős videó. A „Gordon” név maradjon. A csatorna neve: Konyhakaland." class="opt fld resize-none overflow-hidden leading-snug"></textarea>
+                                <div class="relative shrink-0">
+                                    <button id="notes-magic" type="button" title="Gyakori megjegyzések beszúrása" class="w-[46px] h-[42px] rounded-[9px] flex items-center justify-center text-brand-400 border border-brand-500/50 bg-brand-500/10 hover:bg-brand-500/20 transition-colors" style="box-shadow: 0 0 14px -4px rgba(255,107,0,.7)">
+                                        <i data-lucide="sparkles" class="w-5 h-5"></i>
+                                    </button>
+                                    <div id="notes-menu" class="hidden absolute right-0 bottom-full mb-2 z-30 w-72 bg-dark-card border border-brand-500/30 rounded-xl p-2 shadow-2xl shadow-black/60">
+                                        <p class="text-[11px] text-gray-400 px-2 pt-1 pb-2">Kattints, és a megjegyzés végére kerül:</p>
+                                        <div id="notes-snips" class="space-y-1"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="toggles" class="space-y-3 pt-4 border-t border-dark-border"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- JOBB OSZLOP: előnézet, fájlok, indítás -->
+            <div class="lg:col-span-7 space-y-7 min-w-0">
+                <section class="hud">
+                    <div class="hud-edge"></div>
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="ico-box"><i data-lucide="square-play" class="w-5 h-5"></i></div>
+                            <h2 class="hud-title text-xl font-semibold text-brand-400">Eredmény előnézet</h2>
+                        </div>
+                        <div class="flex bg-black/40 p-1 rounded-lg border border-dark-border text-sm">
+                            <button id="track-hu" class="seg-on px-4 py-1.5 rounded-md transition-all">Magyar szinkron</button>
+                            <button id="track-orig" class="seg-off px-4 py-1.5 rounded-md transition-all">Eredeti</button>
+                        </div>
+                    </div>
+                    <div id="stage" class="relative rounded-lg overflow-hidden aspect-video border border-dark-border flex items-center justify-center">
+                        <video id="video" class="hidden w-full h-full object-contain bg-black cursor-pointer" preload="metadata" playsinline></video>
+                        <audio id="orig-audio" preload="none"></audio>
+                        <audio id="audio" preload="metadata"></audio>
+                        <div id="audio-only" class="hidden flex-col items-center justify-center gap-3 w-full px-8 pb-12">
+                            <div class="w-20 h-20 rounded-full text-brand-400 ring-glow flex items-center justify-center bg-brand-500/5"><i data-lucide="audio-lines" class="w-9 h-9"></i></div>
+                            <p class="text-sm text-gray-400">Hangfájl</p>
+                        </div>
+                        <div id="preview-empty" class="flex flex-col items-center justify-center text-center gap-2 px-6 pb-12">
+                            <div class="w-20 h-20 rounded-full ring-glow text-gray-100 flex items-center justify-center mb-3 bg-black/30"><i data-lucide="clapperboard" class="w-9 h-9"></i></div>
+                            <p class="text-lg font-semibold text-gray-100">Az eredmény itt jelenik meg</p>
+                            <p class="text-sm text-gray-400">Indítsd el a szinkronizálást a videó feldolgozásához</p>
+                        </div>
+                        <span id="video-badge" class="hidden absolute top-3 right-3 bg-brand-500/20 text-brand-300 text-[10px] px-2 py-0.5 rounded font-mono border border-brand-500/30 backdrop-blur"></span>
+
+                        <!-- saját vezérlősáv (a videóhoz és a hangfájlhoz is) -->
+                        <div id="player-bar" class="absolute left-0 right-0 bottom-0 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 pt-6 pb-2.5" style="background: linear-gradient(0deg, rgba(0,0,0,.85), rgba(0,0,0,0))">
+                            <button id="pl-play" class="pl-btn" title="Lejátszás / szünet"><i data-lucide="play" class="w-5 h-5 fill-current"></i></button>
+                            <span id="pl-time" class="text-xs font-mono text-gray-300 whitespace-nowrap">0:00 / 0:00</span>
+                            <input id="pl-seek" type="range" min="0" max="1000" value="0" class="rng sm flex-1 min-w-[60px]" title="Tekerés">
+                            <button id="pl-mute" class="pl-btn" title="Némítás"><i data-lucide="volume-2" class="w-5 h-5"></i></button>
+                            <input id="pl-vol" type="range" min="0" max="1" step="0.05" value="1" class="rng sm w-16 hidden sm:block" title="Hangerő">
+                            <div class="relative">
+                                <button id="pl-gear" class="pl-btn" title="Lejátszási sebesség"><i data-lucide="settings" class="w-5 h-5"></i></button>
+                                <div id="pl-menu" class="hidden absolute right-0 bottom-full mb-2 z-30 bg-dark-card border border-dark-border rounded-lg p-1 shadow-2xl w-32">
+                                    <p class="text-[10px] uppercase tracking-wider text-gray-500 px-2 py-1">Sebesség</p>
+                                </div>
+                            </div>
+                            <button id="pl-full" class="pl-btn" title="Teljes képernyő"><i data-lucide="maximize" class="w-5 h-5"></i></button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="hud overflow-hidden">
+                    <div class="hud-edge"></div>
+                    <!-- díszítés: izzó mappa -->
+                    <svg class="hidden md:block absolute right-6 top-2 w-40 h-28 pointer-events-none opacity-90" viewBox="0 0 160 112" fill="none" aria-hidden="true" style="filter: drop-shadow(0 0 6px rgba(255,107,0,.8)) drop-shadow(0 0 18px rgba(255,90,0,.35))">
+                        <path d="M40 30 L40 22 Q40 18 44 18 L68 18 L76 26 L118 26 Q122 26 122 30 L122 40" stroke="#ff7a1a" stroke-width="2" opacity=".55"/>
+                        <path d="M30 38 Q30 34 34 34 L60 34 L68 42 L132 42 Q136 42 136 46 L136 98 Q136 102 132 102 L34 102 Q30 102 30 98 Z" stroke="#ff8a2a" stroke-width="2.4" fill="rgba(255,107,0,.07)"/>
+                        <path d="M74 58 L74 86 L96 72 Z" stroke="#ff8a2a" stroke-width="2.4" stroke-linejoin="round" fill="rgba(255,107,0,.12)"/>
+                    </svg>
+                    <div class="relative flex items-center justify-between gap-3 mb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="ico-box"><i data-lucide="folder-down" class="w-5 h-5"></i></div>
+                            <h2 class="hud-title text-xl font-semibold text-brand-400">Elkészült fájlok</h2>
+                        </div>
+                        <span id="job-name" class="text-xs text-gray-400 truncate max-w-[40%] md:mr-44"></span>
+                    </div>
+                    <div id="files" class="relative space-y-2 md:pr-44 min-h-[44px]">
+                        <p class="text-sm text-gray-300 py-2">Még nincs elkészült fájl.</p>
+                    </div>
+                    <div class="relative grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+                        <button id="open-out" class="btn-ghost py-3 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2">
+                            <i data-lucide="folder-open" class="w-5 h-5 text-brand-400"></i>
+                            <span>Kész fájlok mappája</span>
+                        </button>
+                        <button id="clear-work" class="py-3 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-2 border border-dashed border-gray-600/60 text-gray-300 hover:text-red-300 hover:border-red-500/50 hover:bg-red-500/5 transition-colors">
+                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                            <span>Munkamappák törlése</span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Folyamatjelző -->
+                <div id="progress-card" class="hidden bg-dark-card/90 border border-brand-500/25 rounded-xl px-5 py-4 shadow-lg shadow-black/40">
+                    <div class="flex items-center justify-between gap-3 text-sm mb-2.5">
+                        <span id="progress-desc" class="font-semibold text-gray-100 truncate">–</span>
+                        <span class="font-mono text-gray-300 shrink-0"><span id="progress-pct" class="text-brand-400 font-semibold">0%</span> · <span id="progress-time">0:00</span></span>
+                    </div>
+                    <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden border border-dark-border">
+                        <div id="progress-bar" class="h-full bg-gradient-to-r from-brand-500 to-brand-400 transition-all duration-500" style="width:0%; box-shadow: 0 0 10px rgba(255,107,0,.8)"></div>
+                    </div>
+                    <p id="progress-msg" class="hidden text-sm mt-2.5"></p>
+                </div>
+
+                <div class="grid grid-cols-12 gap-4">
+                    <button id="run" class="btn-go col-span-12 sm:col-span-8 text-lg py-4 px-4 flex items-center justify-center gap-3">
+                        <i data-lucide="play" class="w-6 h-6 fill-current"></i>
+                        <span>Szinkronizálás indítása</span>
+                    </button>
+                    <button id="stop" class="btn-ghost col-span-12 sm:col-span-4 rounded-xl py-4 px-3 text-base font-medium flex items-center justify-center gap-2.5 hover:!text-red-300 hover:!border-red-500/50 hover:!bg-red-500/5">
+                        <i data-lucide="square" class="w-5 h-5"></i>
+                        <span>Megszakítás</span>
+                    </button>
+                </div>
+
+                <section class="hud">
+                    <div class="hud-edge"></div>
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="ico-box !w-8 !h-8"><i data-lucide="terminal" class="w-4 h-4"></i></div>
+                            <h2 class="hud-title text-lg font-semibold text-gray-200">Folyamatnapló</h2>
+                        </div>
+                        <button id="clear-log" class="text-xs text-gray-400 hover:text-white font-mono">Törlés</button>
+                    </div>
+                    <div id="log" class="bg-dark-terminal rounded-lg p-3 h-52 overflow-y-auto font-mono text-[11.5px] space-y-1.5 border border-dark-border/70">
+                        <div class="text-gray-500">Válassz ki egy videót, és nyomd meg a <span class="text-brand-400">Szinkronizálás indítása</span> gombot.</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- ALUL: szöveg ellenőrzése és finomhangolása -->
+        <section class="hud">
+            <div class="hud-edge"></div>
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-4 border-b border-dark-border">
+                <div class="flex items-center gap-3">
+                    <div class="ico-box"><i data-lucide="pen-line" class="w-5 h-5"></i></div>
+                    <h2 class="hud-title text-xl font-semibold text-brand-400">Szöveg ellenőrzése és finomhangolása</h2>
+                </div>
+                <p class="text-sm text-gray-400 max-w-3xl leading-relaxed">
+                    Kattints a <span class="text-brand-400 font-medium">hangszóró</span> gombra a meghallgatáshoz. A <span class="text-gray-200 font-medium">B1, B2…</span> választóval átírhatod, melyik szereplő mondja a sort. A <span class="text-brand-400 font-medium">Magyar</span> és a <span class="text-amber-300 font-medium">Kiejtés</span> oszlop átírható (a kiejtés pl. „Xbox” → „ikszboksz”; ha üres, a felirat szerint olvas). Utána: <span class="text-gray-200 font-medium">Hang készítése</span> – csak a módosított sorok készülnek el újra.
+                </p>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-dark-border bg-black/30 mb-4 max-h-[620px] overflow-y-auto">
+                <table class="w-full min-w-[1100px] text-left text-sm">
+                    <thead class="bg-dark-card text-gray-400 uppercase font-mono text-[11px] border-b border-dark-border sticky top-0 z-10">
+                        <tr>
+                            <th class="p-3 w-14 text-center">#</th>
+                            <th class="p-3 w-24">Időkód</th>
+                            <th class="p-3 w-[28%] min-w-[220px]">Eredeti szöveg</th>
+                            <th class="p-3 w-[32%] min-w-[280px]">Magyar fordítás (szerkeszthető)</th>
+                            <th class="p-3 min-w-[220px]">Kiejtés fonetikusan (opcionális)</th>
+                            <th class="p-3 text-center w-24">Meghallgatás</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows" class="divide-y divide-dark-border font-sans">
+                        <tr><td colspan="6" class="p-6 text-center text-gray-500">Még nincs szöveg. Indíts el egy szinkront (a „Megállás a fordítás után” beállítással a hang előtt átnézheted).</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex flex-col md:flex-row items-center justify-between gap-4 pt-1">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-gray-400">Meghallgatási sáv:</span>
+                    <button id="listen-orig" class="listen px-3 py-1.5 btn-ghost rounded-lg text-sm font-medium flex items-center gap-1.5">
+                        <i data-lucide="headphones" class="w-4 h-4"></i> Eredeti
+                    </button>
+                    <button id="listen-hu" class="listen px-3 py-1.5 bg-brand-500/20 text-brand-400 border border-brand-500/40 rounded-lg text-sm font-medium flex items-center gap-1.5">
+                        <i data-lucide="sparkles" class="w-4 h-4"></i> Új magyar (AI)
+                    </button>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <span id="dirty-count" class="hidden text-sm text-brand-400 font-medium mr-1"></span>
+                    <button id="regen" class="btn-go flex-1 md:flex-none py-3 px-5 text-sm flex items-center justify-center gap-2">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        <span>Hang készítése / újragenerálás (módosított sorokkal)</span>
+                    </button>
+                    <button id="export" class="btn-ghost py-3 px-4 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
+                        <i data-lucide="download-cloud" class="w-4 h-4"></i>
+                        <span>Exportálás javításra</span>
+                    </button>
+                    <button id="import" class="btn-ghost py-3 px-4 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5">
+                        <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+                        <span>Javított importálása</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="relative z-10 px-4 md:px-8 py-4 text-xs text-gray-500 mt-auto">
+        <div class="max-w-[1640px] mx-auto flex flex-wrap items-center justify-between gap-2">
+            <p><span class="text-brand-500">◆</span> AI + helyi erő. A te szinkronod.</p>
+            <p>rkdub <span id="version"></span> · Whisper · OmniVoice · BS-Roformer · Ollama · FFmpeg</p>
+        </div>
+    </footer>
+
+    <!-- Export ablak -->
+    <div id="export-modal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="bg-dark-card border border-brand-500/30 rounded-2xl shadow-2xl shadow-black/70 w-full max-w-4xl p-5 flex flex-col max-h-[90vh]">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2 text-brand-400 font-semibold text-lg hud-title"><i data-lucide="download-cloud" class="w-5 h-5"></i> Exportálás javításra</div>
+                <button class="close-modal text-gray-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <ol class="text-sm text-gray-400 space-y-1 mb-3 list-decimal list-inside">
+                <li>Másold ki a szöveget (<span class="text-gray-200">Másolás</span> gomb), vagy add oda a fájlt: <span id="export-path" class="font-mono text-gray-300 text-xs"></span></li>
+                <li>Kérd meg pl. a Claude-ot: <span class="text-gray-200 italic">„Javítsd ki a magyar szinkronszöveget a fájl elején lévő utasítások szerint, és add vissza a teljes fájlt.”</span></li>
+                <li>A javítottat töltsd vissza: <span class="text-gray-200">Javított importálása</span>.</li>
+            </ol>
+            <textarea id="export-text" readonly class="flex-1 min-h-[320px] w-full bg-dark-terminal border border-dark-border rounded-xl p-3 text-[11px] font-mono text-gray-300 focus:outline-none"></textarea>
+            <div class="flex justify-end gap-2 mt-3">
+                <button id="export-copy" class="btn-go py-2 px-4 text-sm flex items-center gap-1.5"><i data-lucide="copy" class="w-4 h-4"></i> Másolás</button>
+                <button class="close-modal btn-ghost py-2 px-4 rounded-lg text-sm">Bezárás</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import ablak -->
+    <div id="import-modal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="bg-dark-card border border-brand-500/30 rounded-2xl shadow-2xl shadow-black/70 w-full max-w-4xl p-5 flex flex-col max-h-[90vh]">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2 text-brand-400 font-semibold text-lg hud-title"><i data-lucide="upload-cloud" class="w-5 h-5"></i> Javított fordítás importálása</div>
+                <button class="close-modal text-gray-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <p class="text-sm text-gray-400 mb-3">Illeszd be ide a javított szöveget, <span class="text-gray-200">vagy</span> válaszd ki a javított fájlt. Ha mindkettő üres, a <span class="font-mono text-gray-300">kesz</span> mappában lévő exportált fájlt olvassa be (pl. ha azt a Claude Code javította).</p>
+            <textarea id="import-text" placeholder="### 1 | 0:00.44 – 0:01.98 | ...&#10;EN: ...&#10;HU: ...&#10;SAY: ..." class="flex-1 min-h-[300px] w-full bg-dark-terminal border border-dark-border rounded-xl p-3 text-[11px] font-mono text-gray-300 focus:outline-none focus:border-brand-500"></textarea>
+            <div class="flex flex-wrap items-center justify-between gap-2 mt-3">
+                <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                    <span class="btn-ghost py-2 px-3 rounded-lg flex items-center gap-1.5"><i data-lucide="file-text" class="w-4 h-4"></i> Fájl kiválasztása</span>
+                    <input id="import-file" type="file" accept=".txt,.md" class="hidden">
+                    <span id="import-file-name" class="font-mono text-xs"></span>
+                </label>
+                <div class="flex gap-2">
+                    <button id="import-go" class="btn-go py-2 px-4 text-sm flex items-center gap-1.5"><i data-lucide="check" class="w-4 h-4"></i> Importálás</button>
+                    <button class="close-modal btn-ghost py-2 px-4 rounded-lg text-sm">Mégse</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toasts" class="fixed top-24 right-6 z-[60] space-y-2 w-80 max-w-[calc(100vw-2rem)]"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

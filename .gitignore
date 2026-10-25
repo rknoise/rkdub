@@ -1,0 +1,13 @@
+# helyi környezet, modellek és munkafájlok
+.venv/
+.tools/
+.models/
+.bake/
+munkak/
+kesz/
+__pycache__/
+*.pyc
+*.tmp
+feltoltes/
+dist/
+rkdub_ui_mockup.html

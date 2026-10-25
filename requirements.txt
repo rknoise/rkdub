@@ -1,0 +1,19 @@
+# rkdub - csomagok (az install.bat mindet felteszi a projekt saját .venv környezetébe)
+# A PyTorch-ot (torch 2.8.0 + CUDA 12.8) az install.ps1 külön teszi fel az NVIDIA-s csomagtárolóból.
+omnivoice==0.2.1              # magyar beszéd az eredeti hangon (hangklónozás)
+faster-whisper==1.2.1         # beszédfelismerés + a kész magyar sorok visszahallgatása
+audio-separator==0.47.1       # beszéd és háttérzene szétválasztása (BS-Roformer, PyTorch-csal a GPU-n)
+onnxruntime                   # (a CPU-s elég: a GPU-s CUDA 13-at keresne)
+audioread
+fastapi                       # a felület kiszolgálója (helyi weboldal)
+uvicorn
+python-multipart              # fájlfeltöltés a felületről
+gradio==6.30.0                # a régi felület (rkdub.py --classic)
+transformers==5.20.2
+librosa==1.0.0
+soundfile
+scikit-learn                  # beszélők csoportosítása
+speechbrain                   # hangnyomat a beszélők szétválasztásához (ECAPA)
+num2words                     # számok kiírása magyarul
+requests
+imageio-ffmpeg                # tartalék ffmpeg, ha nincs a gépen
