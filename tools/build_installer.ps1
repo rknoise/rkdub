@@ -10,7 +10,7 @@ $Csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 New-Item -ItemType Directory -Force $Build, $Dist | Out-Null
 
 # 1. a program fájljai (a helyi környezet, modellek, munkafájlok és a kész videók nélkül)
-$include = @('dub', 'tools', 'minta', 'rkdub.py', 'start.bat', 'install.bat', 'eltavolitas.bat', 'requirements.txt',
+$include = @('dub', 'tools', 'minta', 'docs', 'rkdub.py', 'start.bat', 'install.bat', 'eltavolitas.bat', 'requirements.txt',
              'README.md', 'rkdub.ico', 'rkdub.png', '.gitignore')
 $stage = Join-Path $Build 'payload'
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue

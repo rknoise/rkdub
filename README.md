@@ -1,10 +1,14 @@
-<p align="center"><img src="rkdub.png" alt="rkdub" width="120"></p>
+<p align="center"><img src="docs/logo.png" alt="rkdub" width="220"></p>
 
 # rkdub – helyi magyar szinkron
 
-> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU, in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (WavLM) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Simple Gradio UI with a line editor.
+> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU, in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer.
 
 Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizálja **az eredeti beszélők hangján**, a háttérzenét és a zajokat megtartva. Minden a saját gépeden fut, a videókártyádon (RTX 3090-en tesztelve). Internet csak a telepítéshez kell.
+
+<p align="center"><img src="docs/kepernyokep.png" alt="Az rkdub felülete" width="900"></p>
+
+**Letöltés:** a telepítő (`rkdub-telepito.exe`) a [Releases](https://github.com/rknoise/rkdub/releases/latest) oldalon van.
 
 ## Mit csinál?
 
