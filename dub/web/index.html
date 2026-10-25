@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rkdub — magyar szinkron</title>
-    <link rel="icon" href="/static/rkdub.png">
+    <title>RKDubby — magyar szinkron</title>
+    <link rel="icon" href="/static/rkdub.png?v=2">
     <!-- A Tailwind és a Lucide helyben van (internet nélkül is működik); a betűtípus netről jön, ha van -->
     <script src="/static/tailwind.js"></script>
     <script src="/static/lucide.min.js"></script>
@@ -147,13 +147,13 @@
     <header class="relative z-10 px-4 md:px-8 pt-5 pb-5">
         <div class="max-w-[1640px] mx-auto flex flex-wrap items-center justify-between gap-4">
             <div class="flex items-center gap-4 min-w-0">
-                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 via-brand-500 to-orange-700 flex items-center justify-center text-white shrink-0"
-                     style="box-shadow: 0 0 0 1px rgba(255,190,140,.45) inset, 0 0 28px -2px rgba(255,107,0,.75)">
-                    <i data-lucide="mic" class="w-7 h-7"></i>
+                <div class="w-16 h-16 rounded-2xl overflow-hidden shrink-0 bg-black"
+                     style="box-shadow: 0 0 26px -4px rgba(255,107,0,.8)">
+                    <img src="/static/rkdub.png?v=2" alt="RKDubby" class="w-full h-full object-cover scale-[1.06]">
                 </div>
                 <div class="min-w-0">
                     <div class="flex items-center gap-3">
-                        <h1 class="font-head font-bold text-3xl text-white tracking-tight leading-none">rkdub</h1>
+                        <h1 class="font-head font-bold text-3xl tracking-tight leading-none"><span class="text-brand-400" style="text-shadow: 0 0 14px rgba(255,107,0,.55)">RK</span><span class="text-white">Dubby</span></h1>
                         <span class="text-sm px-2.5 py-0.5 rounded-md bg-brand-500/15 text-brand-400 font-semibold border border-brand-500/30">magyar szinkron</span>
                     </div>
                     <p class="text-sm text-gray-300 mt-1">Helyi AI szinkron az eredeti beszélők hangján, közvetlenül a videókártyádon</p>
@@ -513,7 +513,7 @@
     <footer class="relative z-10 px-4 md:px-8 py-4 text-xs text-gray-500 mt-auto">
         <div class="max-w-[1640px] mx-auto flex flex-wrap items-center justify-between gap-2">
             <p><span class="text-brand-500">◆</span> AI + helyi erő. A te szinkronod.</p>
-            <p>rkdub <span id="version"></span> · Whisper · OmniVoice · BS-Roformer · Ollama · FFmpeg</p>
+            <p>RKDubby <span id="version"></span> · Whisper · OmniVoice · BS-Roformer · Ollama · FFmpeg</p>
         </div>
     </footer>
 
