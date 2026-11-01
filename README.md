@@ -35,7 +35,19 @@ Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizál
    - asztali ikon, Start menü, eltávolító (a Windows *Telepített alkalmazások* listájában is megjelenik).
 4. A végén **rkdub indítása**.
 
-Rendszergazdai jog nem kell, minden a saját felhasználódhoz kerül. Internet kell hozzá: kb. 25–35 GB letöltés (a 27b fordítómodellel együtt), a géptől és a nettől függően 20–60 perc. Ha megszakad, futtasd újra: a már letöltött részeket nem kezdi elölről.
+A telepítő ablakában végig látszik, melyik rész töltődik éppen, milyen sebességgel, hol tart a teljes folyamat, és mennyi van még hátra.
+
+Rendszergazdai jog nem kell, minden a saját felhasználódhoz kerül. Internet kell hozzá, a letöltés mérete a videókártyádhoz illő fordítómodelltől függ:
+
+| Videómemória | Fordítómodell | Teljes letöltés | Helyigény a lemezen |
+|---|---|---|---|
+| 20 GB-tól | gemma3:27b | kb. 32 GB | kb. 36 GB |
+| 11–20 GB | gemma3:12b | kb. 23 GB | kb. 28 GB |
+| 11 GB alatt | gemma3:4b | kb. 18 GB | kb. 23 GB |
+
+Ha az Ollama már fent van a gépen, 1,7 GB-tal kevesebb; ha DeepL fordít helyi AI helyett (`/noollama`), az Ollama és a fordítómodell is kimarad.
+
+Ha a letöltés megszakad, futtasd újra a telepítőt ugyanabba a mappába. A kész részeket nem tölti le újra, a PyTorch, az Ollama, a fordítómodell és a BS-Roformer ott folytatódik, ahol abbamaradt, a többi modellnél csak a félbemaradt fájl indul elölről.
 
 A telepítő nincs digitálisan aláírva, ezért a Windows először figyelmeztethet („A Windows megvédte a számítógépet”): **További információ → Futtatás mindenképp**.
 

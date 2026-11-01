@@ -4,6 +4,7 @@
 import logging
 import os
 import shutil
+import zipfile
 
 from .util import ROOT, free_gpu
 
@@ -11,11 +12,23 @@ SEP_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"   # BS-Roformer-Viperx-1
 MODEL_DIR = os.path.join(ROOT, ".models", "separator")
 
 
+def drop_broken_model():
+    """Megszakadt letöltés után csonka fájl marad a végleges néven, és az audio-separator késznek hiszi.
+    A .ckpt egy zip, aminek a jegyzéke a fájl végén van: ha az hiányzik, töröljük, hogy újra letöltődjön."""
+    path = os.path.join(MODEL_DIR, SEP_MODEL)
+    if os.path.isfile(path) and not zipfile.is_zipfile(path):
+        os.remove(path)
+        return True
+    return False
+
+
 def separate(mix_wav, out_dir, log=print):
     """-> (vocals.wav, background.wav) az out_dir-ben, a bemenettel azonos mintavétellel."""
     from audio_separator.separator import Separator
 
     os.makedirs(MODEL_DIR, exist_ok=True)
+    if drop_broken_model():
+        log("A BS-Roformer modellfájl csonka volt (megszakadt letöltés), újra letöltöm...")
     tmp = os.path.join(out_dir, "_sep")
     os.makedirs(tmp, exist_ok=True)
     log("Beszéd és háttér szétválasztása (BS-Roformer)...")

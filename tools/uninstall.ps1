@@ -35,7 +35,7 @@ $models = @('models--k2-fsa--OmniVoice', 'models--Systran--faster-whisper-large-
             'models--mobiuslabsgmbh--faster-whisper-large-v3-turbo', 'models--deepdml--faster-whisper-large-v3-turbo-ct2',
             'models--microsoft--wavlm-base-plus-sv') | ForEach-Object { Join-Path $hf $_ } | Where-Object { Test-Path $_ }
 if ($models) {
-    $del = Read-Host 'A letöltött beszéd- és hangmodelleket (kb. 6 GB, Hugging Face gyorsítótár) is törlöm? (i/n)'
+    $del = Read-Host 'A letöltött beszéd- és hangmodelleket (kb. 8 GB, Hugging Face gyorsítótár) is törlöm? (i/n)'
     if ($del -match '^[iIyY]') {
         $models | ForEach-Object { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
         Write-Host '  Modellek törölve.'
