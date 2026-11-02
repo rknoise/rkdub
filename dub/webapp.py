@@ -27,13 +27,15 @@ UPLOAD_DIR = os.path.join(ROOT, "feltoltes")
 
 TRANSLATORS = [("ollama", "Helyi AI (Ollama)"), ("deepl", "DeepL")]
 FORMALITY = [("auto", "Automatikus"), ("informal", "Tegező"), ("formal", "Magázó")]
-REF_MODES = [("hu", "Eredeti hang, magyarosítva (ajánlott)"), ("line", "Eredeti hang, soronkénti hangsúllyal"),
+REF_MODES = [("hu", "Eredeti hang, célnyelvi kiejtéssel (ajánlott)"), ("line", "Eredeti hang, soronkénti hangsúllyal"),
              ("speaker", "Eredeti hang, beszélőnként (angol mintából)")]
 ASR_MODELS = [("large-v3-turbo", "large-v3-turbo (gyors, ajánlott)"), ("large-v3", "large-v3 (legpontosabb)")]
 OPTION_KEYS = ["translator", "ollama_model", "deepl_key", "formality", "num_speakers", "speaker_genders",
                "ref_mode", "notes",
                "keep_background", "keep_nonspeech", "keep_original_track", "subtitles", "stop_after_translate",
-               "asr_model", "tempo", "srt_hu"]
+               "asr_model", "tempo", "srt_hu", "source_lang", "target_lang"]
+TARGET_LANGS = [(k, v[1].capitalize()) for k, v in tr.TARGETS.items()]
+SOURCE_LANGS = [("", "Automatikus felismerés")] + TARGET_LANGS + [("ja", "Japán"), ("ko", "Koreai"), ("zh", "Kínai")]
 
 
 def _level(msg):
@@ -190,7 +192,8 @@ def api_init():
     return {"settings": {k: s.get(k) for k in OPTION_KEYS}, "models": mi["models"], "model_default": mi["default"],
             "ollama_starting": mi["starting"], "version": __version__,
             "choices": {"translator": TRANSLATORS, "formality": FORMALITY, "ref_mode": REF_MODES,
-                        "asr_model": ASR_MODELS}, "gpu": gpu_info()}
+                        "asr_model": ASR_MODELS, "source_lang": SOURCE_LANGS, "target_lang": TARGET_LANGS},
+            "gpu": gpu_info()}
 
 
 def _options(body):
@@ -199,6 +202,8 @@ def _options(body):
     g = o.get("speaker_genders") or []
     o["speaker_genders"] = [x for x in g if x in ("f", "m")][: o["num_speakers"]] if isinstance(g, list) else []
     o["tempo"] = float(o.get("tempo") or 1.0)
+    o["source_lang"] = o.get("source_lang") if o.get("source_lang") in dict(SOURCE_LANGS) else ""
+    o["target_lang"] = o.get("target_lang") if o.get("target_lang") in tr.TARGETS else "hu"
     for k in ("keep_background", "keep_nonspeech", "keep_original_track", "subtitles", "stop_after_translate",
               "srt_hu"):
         o[k] = bool(o.get(k))
@@ -475,11 +480,11 @@ def api_files():
     stem = safe_stem(S.job.src)
     cands = [(res.get("output"), "video" if res.get("has_video") else "audio",
               "Szinkronizált videó" if res.get("has_video") else "Szinkronizált hang"),
-             (res.get("hu_audio"), "audio", "Magyar hangsáv"),
-             (res.get("srt"), "srt", "Magyar felirat"),
+             (res.get("hu_audio"), "audio", "Szinkronhangsáv"),
+             (res.get("srt"), "srt", "Szinkron felirata"),
              (os.path.join(OUT_DIR, stem + "_eredeti.srt"), "srt", "Eredeti felirat"),
              ((st.get("srt_result") or {}).get("srt_only"), "srt", "Felirat (eredeti nyelv)"),
-             ((st.get("srt_result") or {}).get("srt_hu"), "srt", "Magyar felirat (csak felirat mód)"),
+             ((st.get("srt_result") or {}).get("srt_hu"), "srt", "Lefordított felirat (csak felirat mód)"),
              (script.export_path(S.job), "txt", "Szinkronszöveg (export)")]
     files = []
     for path, kind, label in cands:

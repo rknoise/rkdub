@@ -21,6 +21,34 @@ LANG_NAMES = {"en": "English", "de": "German", "fr": "French", "es": "Spanish", 
               "pl": "Polish", "nl": "Dutch", "tr": "Turkish", "uk": "Ukrainian", "sv": "Swedish"}
 
 
+# Célnyelvek: kód -> (angol név a fordító AI-nak, magyar név a felületnek, ISO 639-2 kód a videó
+# hangsávjához, DeepL-kód). Mindet tudja az OmniVoice és a Whisper is.
+TARGETS = {
+    "hu": ("Hungarian", "magyar", "hun", "HU"),
+    "en": ("English", "angol", "eng", "EN-US"),
+    "de": ("German", "német", "ger", "DE"),
+    "fr": ("French", "francia", "fre", "FR"),
+    "es": ("Spanish", "spanyol", "spa", "ES"),
+    "it": ("Italian", "olasz", "ita", "IT"),
+    "pt": ("Portuguese", "portugál", "por", "PT-PT"),
+    "pl": ("Polish", "lengyel", "pol", "PL"),
+    "nl": ("Dutch", "holland", "dut", "NL"),
+    "cs": ("Czech", "cseh", "cze", "CS"),
+    "sk": ("Slovak", "szlovák", "slo", "SK"),
+    "ro": ("Romanian", "román", "rum", "RO"),
+    "sv": ("Swedish", "svéd", "swe", "SV"),
+    "tr": ("Turkish", "török", "tur", "TR"),
+    "ru": ("Russian", "orosz", "rus", "RU"),
+    "uk": ("Ukrainian", "ukrán", "ukr", "UK"),
+}
+NON_LATIN = {"ru", "uk"}
+
+
+def out_key(target):
+    """A fordító AI válaszában a lefordított sor kulcsa (magyarnál a régi, bevált "hu")."""
+    return "hu" if target == "hu" else "tr"
+
+
 # -----------------------------------------------------------------------------
 # Ollama
 # -----------------------------------------------------------------------------
@@ -124,7 +152,9 @@ HU_STYLE = (
 )
 
 
-def _system_prompt(src_lang, formality, notes):
+def _system_prompt(src_lang, formality, notes, target="hu"):
+    if target != "hu":
+        return _generic_prompt(src_lang, formality, notes, target)
     src = LANG_NAMES.get(src_lang, src_lang or "English")
     s = (f"You are an experienced Hungarian dubbing translator (szinkronfordító). You translate {src} video "
          "dialogue into natural, idiomatic, spoken Hungarian that a Hungarian voice actor will perform as a "
@@ -155,6 +185,36 @@ def _system_prompt(src_lang, formality, notes):
     return s
 
 
+def _generic_prompt(src_lang, formality, notes, target):
+    """Nem magyar célnyelv: ugyanazok a szinkronfordítói szabályok, a magyar stílusjegyzet nélkül."""
+    src = LANG_NAMES.get(src_lang, TARGETS.get(src_lang, (src_lang or "English",))[0])
+    tgt = TARGETS[target][0]
+    s = (f"You are an experienced dubbing translator. You translate {src} video dialogue into natural, idiomatic, "
+         f"spoken {tgt} that a {tgt} voice actor will perform as a lip-free dub.\n"
+         "Rules:\n"
+         "- Keep the meaning, tone, emotion and register. Slang and swearing are fine when the original has them.\n"
+         f"- Every line has a time budget (max_chars). The {tgt} line must be speakable in the same time as the "
+         "original: stay within max_chars; if needed, condense and drop filler words, but never drop essential "
+         "information.\n"
+         "- Numbers, units and versions may stay as digits.\n"
+         "- Each line is translated separately (do not merge or split lines), but use the surrounding lines "
+         "for context.\n"
+         "- The text comes from speech recognition: punctuation and sentence boundaries may be missing or wrong, "
+         "and product names may be misheard. Infer the intended meaning from context.\n"
+         f"- Write natural {tgt}, not a word-for-word translation.\n"
+         "- No quotes, brackets, notes, emojis or explanations in the output.\n")
+    if formality == "informal":
+        s += "- Use the informal form of address where the language has one.\n"
+    elif formality == "formal":
+        s += "- Use the formal, polite form of address where the language has one.\n"
+    else:
+        s += "- Choose the form of address from context (friends, YouTubers talking to the viewer: informal).\n"
+    if notes:
+        s += "- Additional instructions from the user: " + notes.strip() + "\n"
+    s += 'Answer with JSON only: {"translations": [{"id": <id>, "tr": "<' + tgt + ' line>"}, ...]}'
+    return s
+
+
 
 
 def max_chars(line):
@@ -165,9 +225,12 @@ def max_chars(line):
     return max(8, int(round(max(by_text, by_time))))
 
 
-def bad_script(text):
+def bad_script(text, target="hu"):
     """Van-e benne nem latin betű (pl. kínai, cirill): a kisebb modellek néha belekevernek egy-egy ilyet."""
     import unicodedata
+
+    if target in NON_LATIN:
+        return False
 
     return any(c.isalpha() and "LATIN" not in unicodedata.name(c, "") for c in text)
 
@@ -189,9 +252,11 @@ def _chat(model, system, user, timeout=600, temperature=0.2):
 
 
 def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", batch=25, log=print,
-                     progress=None):
-    """Minden sorba "hu" kerül. A sorokat csoportosan küldi, az előző csoport végével mint környezettel."""
-    system = _system_prompt(src_lang, formality, notes)
+                     progress=None, target="hu"):
+    """Minden sorba "hu" kerül (a célnyelvi szöveg, a célnyelvtől függetlenül ez a kulcs). A sorokat
+    csoportosan küldi, az előző csoport végével mint környezettel."""
+    system = _system_prompt(src_lang, formality, notes, target)
+    key = out_key(target)
     todo = [ln for ln in lines if not ln.get("hu")]
     done_ct = 0
     for b in range(0, len(todo), batch):
@@ -213,14 +278,14 @@ def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", ba
         for attempt in range(3):
             try:
                 data = _chat(model, system, user)
-                got = {int(t["id"]): str(t["hu"]).strip() for t in data.get("translations", []) if t.get("hu")}
+                got = {int(t["id"]): str(t[key]).strip() for t in data.get("translations", []) if t.get(key)}
                 if all(ln["id"] in got for ln in chunk):
                     break
                 log(f"  a fordítás hiányos ({len(got)}/{len(chunk)} sor), újrapróbálom...")
             except Exception as e:
                 log(f"  fordítási hiba: {e}; újrapróbálom...")
         for ln in chunk:
-            if ln["id"] in got and not bad_script(got[ln["id"]]):
+            if ln["id"] in got and not bad_script(got[ln["id"]], target):
                 ln["hu"] = clean_hu(got[ln["id"]])
         missing = [ln for ln in chunk if not ln.get("hu")]
         for ln in missing:   # hiányzó vagy idegen betűs sor: soronként újra
@@ -232,13 +297,13 @@ def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", ba
             for attempt in range(3):
                 try:
                     data = _chat(model, system, one, temperature=0.2 + 0.25 * attempt)
-                    last = clean_hu(data["translations"][0]["hu"])
-                    if last and not bad_script(last):
+                    last = clean_hu(data["translations"][0][key])
+                    if last and not bad_script(last, target):
                         break
                 except Exception as e:
                     log(f"  a(z) {ln['id'] + 1}. sor fordítása: {e}")
             if last:
-                if bad_script(last):    # végső eset: az idegen betűs szó kimarad
+                if bad_script(last, target):    # végső eset: az idegen betűs szó kimarad
                     import unicodedata
                     last = clean_hu("".join(c for c in last if not c.isalpha() or "LATIN" in unicodedata.name(c, "")))
                 ln["hu"] = last
@@ -472,17 +537,18 @@ def pronounce_ollama(lines, model, log=print, progress=None):
     return mapping
 
 
-def shorten_ollama(line, target_chars, model, src_lang="en", formality="auto", notes=""):
-    """Rövidebb magyar változat egy túl hosszú sorhoz."""
-    system = _system_prompt(src_lang, formality, notes)
-    user = ("This Hungarian dubbing line is too long to fit its time slot. Rephrase it to about "
+def shorten_ollama(line, target_chars, model, src_lang="en", formality="auto", notes="", target="hu"):
+    """Rövidebb célnyelvi változat egy túl hosszú sorhoz."""
+    system = _system_prompt(src_lang, formality, notes, target)
+    tgt = TARGETS[target][0]
+    user = (f"This {tgt} dubbing line is too long to fit its time slot. Rephrase it to about "
             f"{target_chars} characters (not much shorter). Keep the full meaning of the original and a natural "
-            "spoken Hungarian style: shorten by rephrasing and dropping filler words, not by dropping content "
+            f"spoken {tgt} style: shorten by rephrasing and dropping filler words, not by dropping content "
             "or changing what is said.\n"
             + json.dumps([{"id": line["id"], "max_chars": target_chars, "text": line["en"],
-                           "current_hungarian": line["hu"]}], ensure_ascii=False))
+                           f"current_{tgt.lower()}": line["hu"]}], ensure_ascii=False))
     data = _chat(model, system, user, timeout=180)
-    return clean_hu(data["translations"][0]["hu"])
+    return clean_hu(data["translations"][0][out_key(target)])
 
 
 def clean_hu(t):
@@ -506,14 +572,15 @@ def load_deepl_key(settings):
         return ""
 
 
-def translate_deepl(lines, key, src_lang="en", formality="auto", log=print, progress=None):
+def translate_deepl(lines, key, src_lang="en", formality="auto", log=print, progress=None, target="hu"):
     host = "https://api-free.deepl.com" if key.endswith(":fx") else "https://api.deepl.com"
     headers = {"Authorization": f"DeepL-Auth-Key {key}"}
     todo = [ln for ln in lines if not ln.get("hu")]
     for b in range(0, len(todo), 40):
         chunk = todo[b:b + 40]
         ctx = " ".join(ln["en"] for ln in lines if ln["id"] < chunk[0]["id"])[-1500:]
-        body = {"text": [ln["en"] for ln in chunk], "target_lang": "HU", "split_sentences": "nonewlines"}
+        body = {"text": [ln["en"] for ln in chunk], "target_lang": TARGETS[target][3],
+                "split_sentences": "nonewlines"}
         if src_lang:
             body["source_lang"] = src_lang.upper()
         if formality in ("formal", "informal"):

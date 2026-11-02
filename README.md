@@ -95,12 +95,14 @@ Ha csak feliratot készítenél, a fordító AI nem kell: a telepítőben kapcso
 
 | | |
 |---|---|
+| Forrásnyelv | milyen nyelven beszélnek a felvételen; alapból **automatikus felismerés** |
+| Célnyelv | erre a nyelvre fordít és szinkronizál: alapból **magyar**, de lehet angol, német, francia, spanyol, olasz, portugál, lengyel, holland, cseh, szlovák, román, svéd, török, orosz vagy ukrán is (pl. magyar videó angolra) |
 | Fordító | Helyi AI (Ollama) vagy DeepL |
 | Whisper-modell | large-v3-turbo (gyors) vagy large-v3 (pontosabb felismerés) |
 | Megszólítás | automatikus / tegező / magázó |
 | Beszédtempó | 0,85–1,15×; 1,00 = a beszélő természetes tempója |
 | Szereplők száma | csúszka 0–10-ig: **auto** = a program dönti el; ha tudod, állítsd be (pontosabb). Alatta a **Nő / Férfi** mezőkbe beírhatod, hányan vannak (pl. 2 nő, 3 férfi): ilyenkor a program hangmagasság szerint előbb nőkre és férfiakra bontja a sorokat, így két különböző nemű szereplő hangja nem keveredik. A számozás is ehhez igazodik (B1–B2 nők, B3–B5 férfiak). Amit nem adsz meg, annak a nemét a program dönti el. |
-| Hangklónozás / célhang | **magyarosított** (ajánlott): akcentus nélkül; **soronként**: az eredeti angol mondat a minta, jobban követi a hangsúlyt, de angolosabb; **beszélőnként**: angol minta, egységes hang |
+| Hangklónozás / célhang | **célnyelvi kiejtéssel** (ajánlott): akcentus nélkül; **soronként**: az eredeti angol mondat a minta, jobban követi a hangsúlyt, de angolosabb; **beszélőnként**: angol minta, egységes hang |
 | Megjegyzés a fordítónak | pl. a videó témája, nevek, kifejezések; a ✨ gombbal gyakori megjegyzések szúrhatók be (stílus, nevek, szakszavak) |
 | Háttérzene és zajok | megmaradjanak-e |
 | Nevetés, kiáltás, sóhaj | az eredeti hang nem beszédes részei megmaradjanak-e |
@@ -129,6 +131,8 @@ Mért adatok (40 mp-es, kétszereplős próbavideó, gemma3:27b):
 - Telepítés után internet nélkül is működik (a modellek helyben vannak; ha a `.models\letoltve.txt` fájlt törlöd, újra ellenőrzi őket).
 
 ## Korlátok
+
+- **Más célnyelvek:** a program a magyarra van a leginkább hangolva. Magyar célnyelvnél egy külön kör kijavítja a tükörfordításokat, és a számokat, rövidítéseket, neveket magyar kiejtés szerint írja ki. Más célnyelvnél ez a két lépés kimarad, a hangmodell maga olvassa fel a számokat.
 
 - **Akcentus:** a magyarosított hangmintával alig hallható. A soronkénti módban (angol minta) a magyar beszéd néha angolos.
 - **Szájmozgás:** nincs szájszinkron, a mondatok időzítése igazodik az eredetihez (mint az ElevenLabsnél).

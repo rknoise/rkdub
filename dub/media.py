@@ -75,7 +75,7 @@ def write_audio(path, y, sr):
     sf.write(path, y, sr, subtype="FLOAT" if path.lower().endswith(".wav") else None)
 
 
-def mux_video(src, dub_wav, out_path, keep_original=True, srt_path=None):
+def mux_video(src, dub_wav, out_path, keep_original=True, srt_path=None, lang="hun", lang_name="Magyar"):
     """A videókép változatlanul (újrakódolás nélkül), mellé a magyar hang (1. sáv, alapértelmezett),
     kérésre az eredeti hang (2. sáv) és a magyar felirat (kikapcsolható)."""
     ext = os.path.splitext(out_path)[1].lower()
@@ -90,12 +90,12 @@ def mux_video(src, dub_wav, out_path, keep_original=True, srt_path=None):
     args += ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]
     if srt_path:
         args += ["-c:s", "mov_text" if ext in (".mp4", ".m4v", ".mov") else "srt"]
-    args += ["-metadata:s:a:0", "language=hun", "-metadata:s:a:0", "title=Magyar szinkron",
+    args += ["-metadata:s:a:0", f"language={lang}", "-metadata:s:a:0", f"title={lang_name} szinkron",
              "-disposition:a:0", "default"]
     if keep_original:
         args += ["-metadata:s:a:1", "title=Eredeti", "-disposition:a:1", "0"]
     if srt_path:
-        args += ["-metadata:s:s:0", "language=hun", "-metadata:s:s:0", "title=Magyar",
+        args += ["-metadata:s:s:0", f"language={lang}", "-metadata:s:s:0", f"title={lang_name}",
                  "-disposition:s:0", "0"]
     if ext in (".mp4", ".m4v", ".mov"):
         args += ["-movflags", "+faststart"]

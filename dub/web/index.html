@@ -266,6 +266,14 @@
                     <div id="settings-content" class="mt-5 space-y-5">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
                             <div>
+                                <label class="lbl" for="source_lang" title="Milyen nyelven beszélnek a felvételen (alapból felismeri)">Forrásnyelv</label>
+                                <select id="source_lang" class="opt fld"></select>
+                            </div>
+                            <div>
+                                <label class="lbl" for="target_lang" title="Erre a nyelvre fordít és szinkronizál">Célnyelv</label>
+                                <select id="target_lang" class="opt fld"></select>
+                            </div>
+                            <div>
                                 <label class="lbl" for="ref_mode">Hangklónozás / célhang</label>
                                 <select id="ref_mode" class="opt fld"></select>
                             </div>
@@ -344,7 +352,7 @@
                             <h2 class="hud-title text-xl font-semibold text-brand-400">Eredmény előnézet</h2>
                         </div>
                         <div class="flex bg-black/40 p-1 rounded-lg border border-dark-border text-sm">
-                            <button id="track-hu" class="seg-on px-4 py-1.5 rounded-md transition-all">Magyar szinkron</button>
+                            <button id="track-hu" class="seg-on px-4 py-1.5 rounded-md transition-all">Szinkron</button>
                             <button id="track-orig" class="seg-off px-4 py-1.5 rounded-md transition-all">Eredeti</button>
                         </div>
                     </div>
@@ -474,7 +482,7 @@
                             <th class="p-3 w-14 text-center">#</th>
                             <th class="p-3 w-24">Időkód</th>
                             <th class="p-3 w-[28%] min-w-[220px]">Eredeti szöveg</th>
-                            <th class="p-3 w-[32%] min-w-[280px]">Magyar fordítás (szerkeszthető)</th>
+                            <th class="p-3 w-[32%] min-w-[280px]">Fordítás (szerkeszthető)</th>
                             <th class="p-3 min-w-[220px]">Kiejtés fonetikusan (opcionális)</th>
                             <th class="p-3 text-center w-24">Meghallgatás</th>
                         </tr>

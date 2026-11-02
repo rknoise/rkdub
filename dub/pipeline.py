@@ -34,7 +34,8 @@ DEFAULT_OPTIONS = {
     "asr_model": "large-v3-turbo",   # beszédfelismerő: large-v3-turbo (gyors) | large-v3 (pontosabb)
     "tempo": 1.0,                    # beszédtempó a magyar hangnál (1.0 = a beszélő természetes tempója)
     "mode": "dub",                   # dub: szinkron | srt: csak felirat az eredeti nyelven (pl. dalszöveghez)
-    "srt_hu": False,                 # csak felirat módban: magyar fordítás is (<név>.hu.srt)
+    "srt_hu": False,                 # csak felirat módban: fordítás is a célnyelvre (<név>.<célnyelv>.srt)
+    "target_lang": "hu",             # célnyelv (translate.TARGETS); a sorokban a célnyelvi szöveg kulcsa "hu"
 }
 
 STAGES = [("prepare", 2), ("separate", 12), ("transcribe", 8), ("speakers", 3), ("translate", 15),
@@ -219,18 +220,19 @@ class DubJob:
         self.state["srt_result"] = {"srt_only": path, "lines": len(subs), "lang": data["lang"]}
         self.log(f"Kész a felirat: {path} ({len(subs)} sor, nyelv: {data['lang']})")
         if self.opt.get("srt_hu"):
-            if data["lang"] == "hu":
-                self.log("A felvétel magyar nyelvű, nincs mit fordítani.")
+            target = self.target()
+            if data["lang"] == target:
+                self.log("A felvétel már a célnyelven szól, nincs mit fordítani.")
             else:
-                hu_path = os.path.join(OUT_DIR, safe_stem(self.src) + ".hu.srt")
+                hu_path = os.path.join(OUT_DIR, f"{safe_stem(self.src)}.{target}.srt")
                 self._translate_subs(subs, data["lang"])
                 to_srt(subs, hu_path, "hu")
                 self.state["srt_result"]["srt_hu"] = hu_path
-                self.log(f"Kész a magyar felirat: {hu_path}")
+                self.log(f"Kész a lefordított felirat: {hu_path}")
         self.save_state()
 
     def _translate_subs(self, subs, lang):
-        """A feliratsorok magyarul ("hu"), a szinkronnal azonos fordítóval; az időzítés nem változik."""
+        """A feliratsorok a célnyelven ("hu" kulcs), a szinkronnal azonos fordítóval; az időzítés nem változik."""
         from . import translate as tr
         from .transcribe import wrap_two
 
@@ -241,19 +243,26 @@ class DubJob:
         if o["translator"] == "deepl":
             key = o.get("deepl_key") or tr.load_deepl_key({})
             if not key:
-                raise RuntimeError("nincs DeepL-kulcs (a magyar felirathoz fordító kell)")
-            tr.translate_deepl(lines, key, src_lang=lang, formality=o["formality"], log=self.log, progress=prog)
+                raise RuntimeError("nincs DeepL-kulcs (a lefordított felirathoz fordító kell)")
+            tr.translate_deepl(lines, key, src_lang=lang, formality=o["formality"], log=self.log, progress=prog,
+                               target=self.target())
         else:
             model = self._ollama_model(tr)
             free_gpu()
             self.log(f"Felirat fordítása helyi AI-val: {model}")
             try:
                 tr.translate_ollama(lines, model, src_lang=lang, formality=o["formality"], notes=o["notes"],
-                                    log=self.log, progress=prog)
+                                    log=self.log, progress=prog, target=self.target())
             finally:
                 tr.unload_ollama(model)
         for s, ln in zip(subs, lines):
             s["hu"] = wrap_two(ln.get("hu") or "")
+
+    def target(self):
+        from .translate import TARGETS
+
+        t = self.opt.get("target_lang") or "hu"
+        return t if t in TARGETS else "hu"
 
     def _ollama_model(self, tr):
         """A választott (vagy, ha nincs meg, a legjobb elérhető) Ollama-modell neve."""
@@ -297,8 +306,9 @@ class DubJob:
     def translate(self):
         o = self.opt
         model = o["ollama_model"] if o["translator"] == "ollama" else "deepl"
+        target = self.target()
         sig = _sig(self.state["sigs"].get("speakers"), o["translator"], model, o["formality"], o["notes"],
-                   o.get("review", True), "v3-hustyle-say")
+                   o.get("review", True), "v3-hustyle-say", "" if target == "hu" else target)
         lines = self.lines()
         if self._fresh("translate", sig, "lines.json") and all(ln.get("hu") for ln in lines):
             return
@@ -309,13 +319,20 @@ class DubJob:
         lang = (read_json(self.p("words.json")) or {}).get("lang", "en")
         from . import translate as tr
 
+        if lang == target:
+            raise RuntimeError(f"a felvétel már {tr.TARGETS[target][1]} nyelvű; válassz másik célnyelvet "
+                               "a beállításoknál")
+        hu = target == "hu"          # a stílusjavító és a kiejtési kör a magyarra van hangolva
+        if not hu:
+            self.state["pron_terms"] = {}
         prog = lambda f: self.progress(f, "Fordítás")    # noqa: E731
         if o["translator"] == "deepl":
             key = o.get("deepl_key") or tr.load_deepl_key({})
             if not key:
                 raise RuntimeError("nincs DeepL-kulcs")
-            tr.translate_deepl(lines, key, src_lang=lang, formality=o["formality"], log=self.log, progress=prog)
-            pmodel = tr.pick_default_model(tr.ollama_models()) if tr.ensure_ollama(self.log) else ""
+            tr.translate_deepl(lines, key, src_lang=lang, formality=o["formality"], log=self.log, progress=prog,
+                               target=target)
+            pmodel = tr.pick_default_model(tr.ollama_models()) if hu and tr.ensure_ollama(self.log) else ""
             if pmodel:                       # a kiejtési lépéshez DeepL mellett is jó a helyi AI, ha van
                 free_gpu()
                 try:
@@ -325,20 +342,21 @@ class DubJob:
         else:
             model = self._ollama_model(tr)
             free_gpu()
-            self.log(f"Fordítás helyi AI-val: {model}")
+            self.log(f"Fordítás helyi AI-val ({tr.TARGETS[target][1]} nyelvre): {model}")
             try:
                 tr.translate_ollama(lines, model, src_lang=lang, formality=o["formality"], notes=o["notes"],
-                                    log=self.log, progress=lambda f: prog(0.5 * f))
-                if o.get("review", True):
+                                    log=self.log, progress=lambda f: prog(0.5 * f), target=target)
+                if o.get("review", True) and hu:
                     self.log("A fordítás átnézése (második kör)...")
                     tr.review_ollama(lines, model, src_lang=lang, formality=o["formality"], notes=o["notes"],
                                      log=self.log, progress=lambda f: prog(0.5 + 0.2 * f))
                     self.log("Célzott javítás: tükörfordítás, túl hosszú sorok...")
                     tr.fix_problems_ollama(lines, model, src_lang=lang, formality=o["formality"], notes=o["notes"],
                                            log=self.log, progress=lambda f: prog(0.7 + 0.15 * f))
-                self.log("Kiejtés: számok, rövidítések, nevek magyarosan...")
-                self.state["pron_terms"] = tr.pronounce_ollama(lines, model, log=self.log,
-                                                               progress=lambda f: prog(0.85 + 0.15 * f))
+                if hu:
+                    self.log("Kiejtés: számok, rövidítések, nevek magyarosan...")
+                    self.state["pron_terms"] = tr.pronounce_ollama(lines, model, log=self.log,
+                                                                   progress=lambda f: prog(0.85 + 0.15 * f))
             finally:
                 tr.unload_ollama(model)
         self.save_lines(lines)
@@ -425,7 +443,7 @@ class DubJob:
         return max(0.6, min(nxt - ln["start"] - 0.08, slot + 1.5))
 
     def synthesize(self):
-        from .tts import HungarianVoice, speakable
+        from .tts import HungarianVoice, speak_for
 
         lines = self.lines()
         total = self.state["info"]["duration"] or 0
@@ -435,12 +453,14 @@ class DubJob:
         hu_mode = self.opt["ref_mode"] == "hu"
         refs = self._refs(lines, vocals, sr, mode="speaker" if hu_mode else None)
         eng_refs = dict(refs)
-        if hu_mode:        # a sorok a magyarosított mintát kapják; a hangja a hangmodell betöltése után készül el
-            from .tts import ANCHOR_TEXT
+        target = self.target()
+        if hu_mode:        # a sorok a célnyelvi mintát kapják; a hangja a hangmodell betöltése után készül el
+            from .tts import ANCHORS
 
+            anchor = ANCHORS[target]
             for ln in lines:
                 spk = ln.get("speaker", 0)
-                refs[ln["id"]] = (f"hu{spk}-{_sig(eng_refs[ln['id']][2], ANCHOR_TEXT, 'a1')}", None, ANCHOR_TEXT)
+                refs[ln["id"]] = (f"hu{spk}-{_sig(eng_refs[ln['id']][2], anchor, 'a1')}", None, anchor)
 
         def key_of(ln, i):
             ref = refs[ln["id"]]
@@ -455,7 +475,8 @@ class DubJob:
             return
         self.log(f"{len(todo)} sor hangja készül" + (f" (a többi {len(lines) - len(todo)} kész)"
                                                        if len(todo) < len(lines) else ""))
-        voice = HungarianVoice(log=self.log, qc=self.opt["qc"], tempo=self.opt.get("tempo", 1.0))
+        voice = HungarianVoice(log=self.log, qc=self.opt["qc"], tempo=self.opt.get("tempo", 1.0), lang=target)
+        speakable = lambda t: speak_for(t, target)      # noqa: E731
         too_long = []
         try:
             if hu_mode:
@@ -476,7 +497,7 @@ class DubJob:
                 voice = None
                 self._shorten(lines, too_long, total)
                 self.save_lines(lines)
-                voice = HungarianVoice(log=self.log, qc=self.opt["qc"], tempo=self.opt.get("tempo", 1.0))
+                voice = HungarianVoice(log=self.log, qc=self.opt["qc"], tempo=self.opt.get("tempo", 1.0), lang=target)
                 for n, i in enumerate(too_long):
                     self.check_cancel()
                     self._synth_one(voice, lines, i, refs, total, speakable, key_of)
@@ -525,7 +546,7 @@ class DubJob:
                     sim_fn = lambda y, t=target: float(emb.embed(librosa.resample(y, orig_sr=24000, target_sr=16000)) @ t)  # noqa: E731
                 y, c, ph, sim = voice.hu_anchor(voice.prompt(ekey, eaudio, etext), sim_fn)
                 sf.write(path, y, 24000)
-                self.log(f"  magyarosított hangminta, {spk + 1}. beszélő: magyar {ph:.0%}, "
+                self.log(f"  célnyelvi hangminta, {spk + 1}. beszélő: célnyelvi {ph:.0%}, "
                          f"hasonlóság {sim:.2f}, eltérés {c:.0%}")
             made[key] = (torch.from_numpy(np.ascontiguousarray(y, dtype=np.float32)), 24000)
         if emb is not None:
@@ -572,14 +593,15 @@ class DubJob:
                 target = max(6, int(len(ln["hu"]) * ratio * 0.95))
                 try:
                     new = tr.shorten_ollama(ln, target, model, formality=self.opt["formality"],
-                                            notes=self.opt["notes"])
+                                            notes=self.opt["notes"], target=self.target())
                     if new and len(new) < len(ln["hu"]):
                         self.log(f"  {i + 1}. sor: „{ln['hu']}” -> „{new}”")
                         ln["hu_long"], ln["hu"] = ln["hu"], new
                 except Exception as e:
                     self.log(f"  {i + 1}. sor rövidítése nem sikerült: {short_err(e)}")
-            more = tr.pronounce_ollama([lines[i] for i in idx], model, log=self.log)   # az új szöveg kiejtése
-            self.state.setdefault("pron_terms", {}).update(more or {})
+            if self.target() == "hu":
+                more = tr.pronounce_ollama([lines[i] for i in idx], model, log=self.log)   # az új szöveg kiejtése
+                self.state.setdefault("pron_terms", {}).update(more or {})
         finally:
             tr.unload_ollama(model)
 
@@ -627,7 +649,11 @@ class DubJob:
         sub_lines = [ln for i, ln in enumerate(lines) if times[i]]
         sub_times = [t for t in times if t]
         os.makedirs(OUT_DIR, exist_ok=True)
-        stem = safe_stem(self.src) + "_magyar"
+        from .translate import TARGETS
+
+        target = self.target()
+        _en, name, iso3, _dl = TARGETS[target]
+        stem = safe_stem(self.src) + ("_magyar" if target == "hu" else f"_{target}")
         srt = os.path.join(OUT_DIR, stem + ".srt")
         to_srt(sub_lines, srt, "hu", sub_times)
         to_srt(lines, os.path.join(OUT_DIR, safe_stem(self.src) + "_eredeti.srt"), "en")
@@ -635,7 +661,8 @@ class DubJob:
         if info["has_video"]:
             media.mux_video(self.src, self.p("dub_mix.wav"), out_path,
                             keep_original=self.opt["keep_original_track"],
-                            srt_path=srt if self.opt["subtitles"] else None)
+                            srt_path=srt if self.opt["subtitles"] else None, lang=iso3,
+                            lang_name=name.capitalize())
             hu_audio = os.path.join(OUT_DIR, stem + "_hangsav.m4a")      # a magyar hangsáv külön is
             media.encode_audio(self.p("dub_mix.wav"), hu_audio)
         else:

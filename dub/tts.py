@@ -18,6 +18,38 @@ FIT_SLACK = 0.35               # ennyivel (mp) nyúlhat túl egy sor a helyén
 # A "magyarosított" hangminta szövege: természetes, sokféle magyar hangot tartalmazó, kb. 8 mp-es mondat.
 ANCHOR_TEXT = ("Sziasztok! Ma egy nagyon izgalmas dologról szeretnék mesélni nektek, "
                "és remélem, hogy ti is legalább annyira élvezni fogjátok, mint én.")
+# Ugyanez a többi célnyelven (a célnyelvi kiejtésű hangmintához; a kulcsok a translate.TARGETS kódjai)
+ANCHORS = {
+    "hu": ANCHOR_TEXT,
+    "en": "Hi everyone! Today I'd like to tell you about something really exciting, and I hope you'll enjoy it "
+          "at least as much as I do.",
+    "de": "Hallo zusammen! Heute möchte ich euch von etwas wirklich Spannendem erzählen, und ich hoffe, es gefällt "
+          "euch mindestens so gut wie mir.",
+    "fr": "Salut tout le monde ! Aujourd'hui, j'aimerais vous parler de quelque chose de vraiment passionnant, et "
+          "j'espère que ça vous plaira autant qu'à moi.",
+    "es": "¡Hola a todos! Hoy quiero contaros algo realmente emocionante, y espero que lo disfrutéis tanto como yo.",
+    "it": "Ciao a tutti! Oggi vorrei raccontarvi qualcosa di davvero entusiasmante, e spero che vi piaccia almeno "
+          "quanto piace a me.",
+    "pt": "Olá a todos! Hoje quero falar-vos de algo muito interessante, e espero que gostem tanto quanto eu.",
+    "pl": "Cześć wszystkim! Dzisiaj chcę wam opowiedzieć o czymś naprawdę ciekawym i mam nadzieję, że spodoba wam "
+          "się tak samo jak mnie.",
+    "nl": "Hallo allemaal! Vandaag wil ik jullie iets heel spannends vertellen, en ik hoop dat jullie het net zo "
+          "leuk vinden als ik.",
+    "cs": "Ahoj všichni! Dnes vám chci povědět o něčem opravdu zajímavém a doufám, že se vám to bude líbit stejně "
+          "jako mně.",
+    "sk": "Ahojte všetci! Dnes vám chcem porozprávať o niečom naozaj zaujímavom a dúfam, že sa vám to bude páčiť "
+          "rovnako ako mne.",
+    "ro": "Salutare tuturor! Astăzi vreau să vă povestesc despre ceva cu adevărat interesant și sper să vă placă "
+          "la fel de mult ca mie.",
+    "sv": "Hej allihop! Idag vill jag berätta om något riktigt spännande, och jag hoppas att ni kommer att gilla "
+          "det lika mycket som jag.",
+    "tr": "Herkese merhaba! Bugün size gerçekten heyecan verici bir şeyden bahsetmek istiyorum ve umarım siz de en "
+          "az benim kadar beğenirsiniz.",
+    "ru": "Всем привет! Сегодня я хочу рассказать вам о чём-то действительно интересном, и надеюсь, вам "
+          "понравится так же, как и мне.",
+    "uk": "Всім привіт! Сьогодні я хочу розповісти вам про щось справді цікаве, і сподіваюся, вам сподобається "
+          "так само, як і мені.",
+}
 
 
 # -----------------------------------------------------------------------------
@@ -137,11 +169,20 @@ def cer(ref, hyp):
 # Hangmotor
 # -----------------------------------------------------------------------------
 
+def speak_for(text, lang):
+    """A felolvasandó szöveg: magyarnál a számok, jelek, rövidítések kiírva; a többi nyelvnél a hangmodell
+    maga olvassa fel őket."""
+    return speakable(text) if lang == "hu" else text
+
+
 class HungarianVoice:
-    def __init__(self, log=print, qc=True, num_step=32, tempo=1.0):
+    """A célnyelvi hang (a név a magyar kezdetekből maradt; a nyelv a `lang`)."""
+
+    def __init__(self, log=print, qc=True, num_step=32, tempo=1.0, lang="hu"):
         import torch
         from omnivoice import OmniVoice
 
+        self.lang = lang
         self.torch = torch
         self.log = log
         self.num_step = num_step
@@ -173,7 +214,7 @@ class HungarianVoice:
 
     def _gen(self, text, prompt, duration=None, seed=0, speed=None):
         self.torch.manual_seed(seed)
-        kw = {"text": text, "language": "hu", "voice_clone_prompt": prompt, "num_step": self.num_step}
+        kw = {"text": text, "language": self.lang, "voice_clone_prompt": prompt, "num_step": self.num_step}
         sp = self.tempo if speed is None else speed
         if duration:
             kw["duration"] = float(duration)
@@ -182,8 +223,9 @@ class HungarianVoice:
         y = self.model.generate(**kw)[0]
         return np.asarray(y, dtype=np.float32).reshape(-1)
 
-    def lang_prob(self, y, lang="hu"):
-        """Mennyire hallja a Whisper magyarnak (0-1): erős akcentusnál alacsony."""
+    def lang_prob(self, y, lang=None):
+        """Mennyire hallja a Whisper célnyelvinek (0-1): erős akcentusnál alacsony."""
+        lang = lang or self.lang
         if self.asr is None:
             return 1.0
         import librosa
@@ -199,11 +241,12 @@ class HungarianVoice:
         használva mintának a magyar sorok magyar kiejtéssel szólnak (az angol minta angolos akcentust ad).
         A próbálkozások közül a hibátlan, biztosan magyarnak hallott változatok közül a leghasonlóbb hangú nyer.
         similarity: fn(hullámforma) -> hasonlóság az eredeti hanghoz (vagy None)."""
-        text = speakable(ANCHOR_TEXT)
+        anchor = ANCHORS.get(self.lang, ANCHOR_TEXT)
+        text = speak_for(anchor, self.lang)
         cands = []
         for k in range(tries if self.asr is not None else 1):
             y = self._gen(text, eng_prompt, seed=seed0 + k, speed=1.0)   # a minta mindig természetes tempójú
-            c, _ = self._check(y, [ANCHOR_TEXT, text])
+            c, _ = self._check(y, [anchor, text])
             ph = self.lang_prob(y)
             sim = similarity(y) if similarity else 0.0
             cands.append((y, c, ph, sim))
@@ -217,7 +260,7 @@ class HungarianVoice:
         import librosa
 
         y16 = librosa.resample(y, orig_sr=TTS_SR, target_sr=16000, res_type="soxr_hq")
-        segs, _ = self.asr.transcribe(y16, language="hu", beam_size=5, condition_on_previous_text=False,
+        segs, _ = self.asr.transcribe(y16, language=self.lang, beam_size=5, condition_on_previous_text=False,
                                       vad_filter=False, without_timestamps=True)
         hyp = " ".join(s.text for s in segs).strip()
         return cer(refs, hyp), hyp

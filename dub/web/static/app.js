@@ -46,9 +46,9 @@ const TOGGLES = [
     ["keep_background", "Háttérzene és zajok megtartása"],
     ["keep_nonspeech", "Nevetés, kiáltás, sóhaj megtartása (az eredetiből)"],
     ["keep_original_track", "Eredeti hang 2. hangsávként a videóban"],
-    ["subtitles", "Magyar felirat beágyazása a videóba"],
+    ["subtitles", "Felirat beágyazása a videóba"],
     ["stop_after_translate", "Megállás a fordítás után (átnézés, export/import a hang előtt)"],
-    ["srt_hu", "Csak felirat (SRT) gombnál magyar fordítás is (.hu.srt)"],
+    ["srt_hu", "Csak felirat (SRT) gombnál fordítás is a célnyelvre"],
 ];
 
 function buildToggles() {
@@ -132,7 +132,8 @@ async function waitModels(n = 0) {
 
 function options() {
     const o = {};
-    for (const id of ["translator", "ollama_model", "deepl_key", "formality", "ref_mode", "asr_model", "notes"]) o[id] = $(id).value;
+    for (const id of ["translator", "ollama_model", "deepl_key", "formality", "ref_mode", "asr_model", "notes",
+                      "source_lang", "target_lang"]) o[id] = $(id).value;
     if (modelsLoaded) savedModel = o.ollama_model;
     else o.ollama_model = savedModel;          // a "még nem fut" sor ne írja felül a mentett modellt
     o.num_speakers = parseInt($("num_speakers").value || "0", 10);
@@ -212,6 +213,8 @@ async function init() {
     const d = await api("/api/init");
     const s = d.settings;
     $("version").textContent = "v" + d.version;
+    fillSelect("source_lang", d.choices.source_lang, s.source_lang || "");
+    fillSelect("target_lang", d.choices.target_lang, s.target_lang || "hu");
     fillSelect("ref_mode", d.choices.ref_mode, s.ref_mode);
     fillSelect("asr_model", d.choices.asr_model, s.asr_model);
     fillSelect("translator", d.choices.translator, s.translator);

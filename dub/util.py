@@ -49,6 +49,22 @@ def ffmpeg_exe():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def ensure_ffmpeg_on_path():
+    """Az audio-separator "ffmpeg" néven keresi a PATH-on, és nélküle leáll. Ha a gépen nincs, az
+    imageio-ffmpeg csomag példányát (más a fájlneve) ffmpeg.exe-ként a .tools\ffmpeg mappába tesszük,
+    és ezt a mappát a PATH elejére."""
+    if shutil.which("ffmpeg"):
+        return
+    import imageio_ffmpeg
+
+    folder = os.path.join(ROOT, ".tools", "ffmpeg")
+    exe = os.path.join(folder, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if not os.path.exists(exe):
+        os.makedirs(folder, exist_ok=True)
+        shutil.copy2(imageio_ffmpeg.get_ffmpeg_exe(), exe)
+    os.environ["PATH"] = folder + os.pathsep + os.environ.get("PATH", "")
+
+
 def run_ffmpeg(args, what="ffmpeg"):
     cmd = [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", *args]
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
