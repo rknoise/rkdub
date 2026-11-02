@@ -24,10 +24,10 @@ def drop_broken_model():
 
 def separate(mix_wav, out_dir, log=print):
     """-> (vocals.wav, background.wav) az out_dir-ben, a bemenettel azonos mintavétellel."""
+    ensure_ffmpeg_on_path()
     from audio_separator.separator import Separator
 
     os.makedirs(MODEL_DIR, exist_ok=True)
-    ensure_ffmpeg_on_path()
     if drop_broken_model():
         log("A BS-Roformer modellfájl csonka volt (megszakadt letöltés), újra letöltöm...")
     tmp = os.path.join(out_dir, "_sep")

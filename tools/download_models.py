@@ -144,14 +144,15 @@ def main():
 
     import logging
 
+    from dub.util import ensure_ffmpeg_on_path
+
+    ensure_ffmpeg_on_path()               # nélküle az audio-separator leáll, ha a gépen nincs ffmpeg
     from audio_separator.separator import Separator
 
     from dub.separate import MODEL_DIR, SEP_MODEL, drop_broken_model
-    from dub.util import ensure_ffmpeg_on_path
 
     name = "BS-Roformer (beszéd és háttér szétválasztása)"
     os.makedirs(MODEL_DIR, exist_ok=True)
-    ensure_ffmpeg_on_path()               # az audio-separator a PATH-on keresi, a gépen nem biztos, hogy van
     drop_broken_model()                   # egy korábbi, megszakadt telepítés maradéka
     emit("SKIP roformer" if os.path.isfile(os.path.join(MODEL_DIR, SEP_MODEL)) else "PART roformer")
     print(f"  {name}...", flush=True)
