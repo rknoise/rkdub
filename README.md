@@ -77,6 +77,12 @@ Ajánlott a **gemma3:27b** (a teszteken ez fordított a legtermészetesebben mag
 
 A régi (Gradio-s) felület is elérhető még: `start.bat --classic`.
 
+### Csak felirat (SRT)
+
+A **Csak felirat (SRT)** gomb szinkron nélkül, az eredeti nyelven készít időzített feliratot a videóból vagy a hangfájlból (MP3, WAV...), például dalszöveghez. A program előbb leválasztja az éneket vagy a beszédet a zenéről, ezért zenés anyagnál is pontosabb. Az eredmény a `kesz\<név>.srt` fájl; a hosszabb sorok két sorba kerülnek, soronként legfeljebb 42 karakterrel. Pontosabb felismeréshez a beállításoknál válaszd a **large-v3** Whisper-modellt.
+
+Ha csak feliratot készítenél, a fordító AI nem kell: a telepítőben kapcsold ki az *Ollama* jelölőnégyzetet (`/noollama`), így kb. 13 GB a letöltés.
+
 ### Fordítás javíttatása (export / import)
 
 1. Kapcsold be a **Megállás a fordítás után** beállítást: a program a fordítás után megáll, még nem készít hangot.

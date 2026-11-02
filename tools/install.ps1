@@ -37,6 +37,7 @@ $TorchIndex = 'https://download.pytorch.org/whl/cu128'
 $TorchWheel = 'torch-2.8.0+cu128-cp312-cp312-win_amd64.whl'
 $TorchSha256 = '0ad925202387f4e7314302a1b4f8860fa824357f9b1466d7992bf276370ebcff'
 $Constraints = Join-Path $Tools 'constraints.txt'
+$Overrides = Join-Path $Tools 'overrides.txt'
 $Steps = 7
 $Gui = $env:RKDUB_GUI -eq '1'
 $OllamaBytes = @{ 'gemma3:27b' = 17413409652; 'gemma3:12b' = 8164039732; 'gemma3:4b' = 3350272403 }
@@ -295,7 +296,10 @@ try {
 
     Step 4 'Csomagok: hangmodell, beszédfelismerő, hangleválasztó, felület...'
     Emit 'PART packages'
-    Uv-Run 'packages' { & $uv pip install --python $Py -r (Join-Path $Root 'requirements.txt') -c $Constraints `
+    # a docopt-ot csak a num2words parancssori része használja; kész wheel nincs belőle, a helyi fordítása pedig
+    # egyes gépeken elhasal, ezért kihagyjuk (a sosem teljesülő feltétel kiveszi a függőségek közül)
+    Set-Content -Encoding ascii $Overrides "docopt ; sys_platform == 'never'"
+    Uv-Run 'packages' { & $uv pip install --python $Py -r (Join-Path $Root 'requirements.txt') -c $Constraints --override $Overrides `
         --extra-index-url $TorchIndex --index-strategy unsafe-best-match }
     Check 'A csomagok telepítése'
     # a csomagok másolatként vannak a .venv-ben, a saját gyorsítótárunk (kb. 8 GB) már csak a helyet foglalná

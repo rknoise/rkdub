@@ -33,13 +33,16 @@ DEFAULT_OPTIONS = {
     "stop_after_translate": False,   # a fordítás után megáll (átnézés, export/import), a hang csak utána készül
     "asr_model": "large-v3-turbo",   # beszédfelismerő: large-v3-turbo (gyors) | large-v3 (pontosabb)
     "tempo": 1.0,                    # beszédtempó a magyar hangnál (1.0 = a beszélő természetes tempója)
+    "mode": "dub",                   # dub: szinkron | srt: csak felirat az eredeti nyelven (pl. dalszöveghez)
 }
 
 STAGES = [("prepare", 2), ("separate", 12), ("transcribe", 8), ("speakers", 3), ("translate", 15),
           ("synthesize", 55), ("mix", 5)]
 STAGE_NAMES = {"prepare": "Előkészítés", "separate": "Beszéd és háttér szétválasztása",
                "transcribe": "Beszédfelismerés", "speakers": "Beszélők azonosítása",
-               "translate": "Fordítás", "synthesize": "Magyar hang készítése", "mix": "Keverés és mentés"}
+               "translate": "Fordítás", "synthesize": "Magyar hang készítése", "mix": "Keverés és mentés",
+               "subtitles": "Felirat mentése"}
+SRT_STAGES = [("prepare", 5), ("separate", 45), ("transcribe", 45), ("subtitles", 5)]
 LINE_REF_MIN = 4.0       # ennél rövidebb sornál a beszélő összesített hangmintája a referencia
 SPK_REF_TARGET = 8.0     # a beszélőnkénti hangminta hossza (mp)
 REF_MAX = 11.0
@@ -88,6 +91,7 @@ class DubJob:
         self.state.setdefault("sigs", {})
         self.state["src"] = self.src
         self._stage_i = 0
+        self.stages = SRT_STAGES if self.opt.get("mode") == "srt" else STAGES
 
     # --- segédek --------------------------------------------------------------
     def p(self, name):
@@ -101,9 +105,9 @@ class DubJob:
             raise Cancelled()
 
     def progress(self, frac, desc=""):
-        done = sum(w for _, w in STAGES[: self._stage_i])
-        w = STAGES[self._stage_i][1] if self._stage_i < len(STAGES) else 0
-        total = sum(w for _, w in STAGES)
+        done = sum(w for _, w in self.stages[: self._stage_i])
+        w = self.stages[self._stage_i][1] if self._stage_i < len(self.stages) else 0
+        total = sum(w for _, w in self.stages)
         if self._progress:
             self._progress((done + w * max(0.0, min(1.0, frac))) / total, desc)
 
@@ -133,9 +137,12 @@ class DubJob:
         t_all = time.time()
         if until is None and self.opt.get("stop_after_translate"):
             until = "translate"                # átnézés / export-import a hang készítése előtt
-        steps = [self.prepare, self.separate, self.transcribe, self.speakers, self.translate,
-                 self.synthesize, self.mix]
-        for i, (fn, (name, _w)) in enumerate(zip(steps, STAGES)):
+        if self.opt.get("mode") == "srt":
+            steps = [self.prepare, self.separate, self.transcribe, self.subtitles]
+        else:
+            steps = [self.prepare, self.separate, self.transcribe, self.speakers, self.translate,
+                     self.synthesize, self.mix]
+        for i, (fn, (name, _w)) in enumerate(zip(steps, self.stages)):
             self._stage_i = i
             self.check_cancel()
             self.progress(0.0, STAGE_NAMES[name])
@@ -147,11 +154,11 @@ class DubJob:
                     self._progress(1.0, STAGE_NAMES[name] + " kész")
                 self.log(f"Megállítva a(z) „{STAGE_NAMES[name]}” lépés után ({fmt_time(time.time() - t_all)})")
                 return {"stopped": name, "lines": len(self.lines())}
-        self._stage_i = len(STAGES)
+        self._stage_i = len(self.stages)
         if self._progress:
             self._progress(1.0, "Kész")
         self.log(f"Összesen: {fmt_time(time.time() - t_all)}")
-        return self.state.get("result", {})
+        return self.state.get("srt_result" if self.opt.get("mode") == "srt" else "result", {})
 
     # 1. hang kibontása
     def prepare(self):
@@ -193,6 +200,20 @@ class DubJob:
             raise RuntimeError("nem találtam beszédet a fájlban")
         write_json(self.p("words.json"), {"lang": lang, "words": words})
         self._done("transcribe", sig)
+
+    # csak felirat: a felismert szövegből időzített SRT az eredeti nyelven (a szinkron eredményét nem írja felül)
+    def subtitles(self):
+        from .mix import to_srt
+        from .transcribe import subtitle_lines
+
+        data = read_json(self.p("words.json"))
+        subs = subtitle_lines(data["words"])
+        os.makedirs(OUT_DIR, exist_ok=True)
+        path = os.path.join(OUT_DIR, safe_stem(self.src) + ".srt")
+        to_srt(subs, path, "text")
+        self.state["srt_result"] = {"srt_only": path, "lines": len(subs), "lang": data["lang"]}
+        self.save_state()
+        self.log(f"Kész a felirat: {path} ({len(subs)} sor, nyelv: {data['lang']})")
 
     # 4. beszélők
     def speakers(self):

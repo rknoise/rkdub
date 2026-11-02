@@ -324,6 +324,7 @@ async function pollState() {
 
     const running = st.status === "running";
     $("run").disabled = running;
+    $("run-srt").disabled = running;
     $("regen").disabled = running;
     if (running || st.status !== "idle") {
         $("progress-card").classList.remove("hidden");
@@ -391,7 +392,7 @@ function upload(file) {
 }
 
 // ---------------------------------------------------------------- futtatás
-async function run() {
+async function run(mode = "dub") {
     const path = $("path").value.trim().replace(/^"|"$/g, "");
     if (!path) { toast("Válassz ki egy videót vagy hangfájlt (húzd be, tallózd ki, vagy írd be az útját).", "err"); return; }
     try {
@@ -399,7 +400,7 @@ async function run() {
         $("log").innerHTML = "";
         lines = [];
         renderRows();
-        await post("/api/run", { path, options: options() });
+        await post("/api/run", { path, mode, options: options() });
         lastStatus = "running";
     } catch (e) { toast(e.message, "err"); }
 }
@@ -745,7 +746,8 @@ function bind() {
     $("browse").addEventListener("click", async () => {
         try { const d = await post("/api/browse"); if (d.path) setPath(d.path); } catch (e) { toast(e.message, "err"); }
     });
-    $("run").addEventListener("click", run);
+    $("run").addEventListener("click", () => run("dub"));
+    $("run-srt").addEventListener("click", () => run("srt"));
     $("stop").addEventListener("click", () => post("/api/stop").then(() => toast("Megszakítás kérve: a folyamatban lévő lépés végén áll meg.", "info")).catch((e) => toast(e.message, "err")));
     $("clear-log").addEventListener("click", () => { $("log").innerHTML = ""; });
     $("listen-hu").addEventListener("click", () => setListen("hu"));

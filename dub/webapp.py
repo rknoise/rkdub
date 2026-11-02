@@ -104,6 +104,10 @@ class AppState:
             if err or not res:
                 self.status = "stopped" if err.startswith("Megszakítva") else "error"
                 self.error = err or "ismeretlen hiba"
+            elif res.get("srt_only"):
+                self.status, self.result = "done", res
+                self.message = (f"Kész a felirat: {res.get('lines', 0)} sor ({res.get('lang', '')}), "
+                                f"{os.path.basename(res['srt_only'])}")
             elif res.get("stopped"):
                 self.status, self.result = "review", res
                 self.message = (f"A fordítás kész ({res.get('lines', 0)} sor). Nézd át lent, vagy exportáld "
@@ -297,10 +301,12 @@ async def api_run(request: Request):
     if not media.is_media(src):
         raise HTTPException(400, "Ezt a fájltípust nem ismerem (videó: mp4, mkv, mov, webm...; hang: wav, mp3, m4a...).")
     o = _options(body.get("options", {}))
+    srt = body.get("mode") == "srt"
+    o = dict(o, mode="srt" if srt else "dub")       # a mód nem beállítás: nem mentjük el
     S.job, S.opts = DubJob(src, o), o
     with S.lock:
         S.logs = []
-    S.start(src, o, f"Indul: {os.path.basename(src)}")
+    S.start(src, o, f"{'Felirat készítése' if srt else 'Indul'}: {os.path.basename(src)}")
     return {"ok": True}
 
 
@@ -462,13 +468,15 @@ def _allowed(path):
 def api_files():
     if not S.job:
         return {"files": [], "preview": None}
-    res = (read_json(S.job.state_path) or {}).get("result") or {}
+    st = read_json(S.job.state_path) or {}
+    res = st.get("result") or {}
     stem = safe_stem(S.job.src)
     cands = [(res.get("output"), "video" if res.get("has_video") else "audio",
               "Szinkronizált videó" if res.get("has_video") else "Szinkronizált hang"),
              (res.get("hu_audio"), "audio", "Magyar hangsáv"),
              (res.get("srt"), "srt", "Magyar felirat"),
              (os.path.join(OUT_DIR, stem + "_eredeti.srt"), "srt", "Eredeti felirat"),
+             ((st.get("srt_result") or {}).get("srt_only"), "srt", "Felirat (eredeti nyelv)"),
              (script.export_path(S.job), "txt", "Szinkronszöveg (export)")]
     files = []
     for path, kind, label in cands:

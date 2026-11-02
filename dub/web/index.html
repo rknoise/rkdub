@@ -424,11 +424,15 @@
                 </div>
 
                 <div class="grid grid-cols-12 gap-4">
-                    <button id="run" class="btn-go col-span-12 sm:col-span-8 text-lg py-4 px-4 flex items-center justify-center gap-3">
+                    <button id="run" class="btn-go col-span-12 sm:col-span-6 text-lg py-4 px-4 flex items-center justify-center gap-3">
                         <i data-lucide="play" class="w-6 h-6 fill-current"></i>
                         <span>Szinkronizálás indítása</span>
                     </button>
-                    <button id="stop" class="btn-ghost col-span-12 sm:col-span-4 rounded-xl py-4 px-3 text-base font-medium flex items-center justify-center gap-2.5 hover:!text-red-300 hover:!border-red-500/50 hover:!bg-red-500/5">
+                    <button id="run-srt" title="Csak időzített felirat az eredeti nyelven, szinkron nélkül (pl. dalszöveghez, hangfájlból is)" class="btn-ghost col-span-6 sm:col-span-3 rounded-xl py-4 px-3 text-base font-medium flex items-center justify-center gap-2.5 hover:!text-brand-300 hover:!border-brand-500/50">
+                        <i data-lucide="captions" class="w-5 h-5"></i>
+                        <span>Csak felirat (SRT)</span>
+                    </button>
+                    <button id="stop" class="btn-ghost col-span-6 sm:col-span-3 rounded-xl py-4 px-3 text-base font-medium flex items-center justify-center gap-2.5 hover:!text-red-300 hover:!border-red-500/50 hover:!bg-red-500/5">
                         <i data-lucide="square" class="w-5 h-5"></i>
                         <span>Megszakítás</span>
                     </button>

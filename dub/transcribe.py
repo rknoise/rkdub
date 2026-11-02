@@ -101,6 +101,42 @@ def split_lines(words, max_len=12.0, hard_max=18.0, pause_break=0.7):
     return lines
 
 
+def wrap_two(text, width=42):
+    """A hosszú feliratsor két sorba, a közepéhez legközelebbi szóközön."""
+    if len(text) <= width:
+        return text
+    cuts = [i for i, c in enumerate(text) if c == " "]
+    if not cuts:
+        return text
+    i = min(cuts, key=lambda k: abs(k - len(text) / 2))
+    return text[:i] + "\n" + text[i + 1:]
+
+
+def subtitle_lines(words, max_chars=84, max_dur=7.0, pause_break=0.6):
+    """Feliratsorok a "csak felirat" módhoz (pl. dalszöveg): rövidebbek, mint a szinkronsorok; szünetnél,
+    mondatvégnél, 2x42 karakternél vagy 7 másodpercnél törnek; a 42 karakternél hosszabb sor két sorba kerül."""
+    lines, cur = [], []
+
+    def flush():
+        if cur:
+            lines.append({"start": cur[0]["start"], "end": cur[-1]["end"], "text": wrap_two(join_words(cur))})
+            cur.clear()
+
+    for i, w in enumerate(words):
+        if cur and (len(join_words(cur + [w])) > max_chars or w["end"] - cur[0]["start"] > max_dur):
+            flush()
+        cur.append(w)
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        if not nxt or nxt["start"] - w["end"] >= pause_break or w["word"].endswith(SENT_END):
+            flush()
+    # a rövid sor kicsit tovább látszik, de nem lóg bele a következőbe
+    for a, b in zip(lines, lines[1:]):
+        a["end"] = max(a["end"], min(a["start"] + 1.2, b["start"] - 0.05))
+    if lines:
+        lines[-1]["end"] = max(lines[-1]["end"], lines[-1]["start"] + 1.2)
+    return lines
+
+
 def merge_short(lines, min_len=1.0, max_gap=0.4, max_len=10.0):
     """A nagyon rövid sorok (pl. "Yeah.") az ugyanattól a beszélőtől jövő szomszédjukhoz kerülnek,
     hogy a hangmodell ne 1 mp-es töredékekből dolgozzon."""
