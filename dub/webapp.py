@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, media, script
 from . import translate as tr
 from .pipeline import DEFAULT_OPTIONS, QC_FLAG, DubJob, safe_stem
-from .util import NO_WINDOW, OUT_DIR, ROOT, WORK_DIR, fmt_time, load_settings, read_json, save_settings
+from .util import NO_WINDOW, OUT_DIR, ROOT, WORK_DIR, cpu_mode, fmt_time, load_settings, read_json, save_settings
 from .worker import JobProcess
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -240,12 +240,22 @@ _gpu_cache = {"t": 0.0, "v": None}
 
 
 def gpu_info():
-    """GPU neve, terhelése, memóriája és hőmérséklete (nvidia-smi), 1 mp-es gyorsítótárral."""
+    """GPU neve, terhelése, memóriája és hőmérséklete (nvidia-smi), 1 mp-es gyorsítótárral. Processzoros módban
+    a processzor terhelése és a gép memóriája (a hőmérséklet Windowson így nem olvasható ki)."""
     if time.time() - _gpu_cache["t"] < 1.0 and _gpu_cache["v"]:
         return _gpu_cache["v"]
     exe = shutil.which("nvidia-smi")
-    v = {"ok": False, "name": "Nincs NVIDIA-kártya"}
-    if exe:
+    v = {"ok": False, "name": "Processzoros mód"}
+    if cpu_mode():
+        try:
+            import psutil
+
+            vm = psutil.virtual_memory()
+            v = {"ok": True, "cpu": True, "name": "Processzoros mód", "util": int(psutil.cpu_percent()),
+                 "mem_used": vm.used / 2 ** 30, "mem_total": vm.total / 2 ** 30, "temp": None}
+        except Exception:
+            pass
+    elif exe:
         try:
             out = subprocess.run([exe, "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
                                   "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=3,

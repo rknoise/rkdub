@@ -10,7 +10,7 @@ import re
 
 import requests
 
-from .util import RKSUBBY_DEEPL_KEY
+from .util import RKSUBBY_DEEPL_KEY, cpu_mode
 
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 if not OLLAMA_URL.startswith("http"):
@@ -115,6 +115,9 @@ def pick_default_model(models):
     # A gemma4 ebben az Ollama-verzióban hibás magyar szavakat ír (idegen betűk, torz szavak), ezért hátul van.
     prefs = ("gemma3:27b", "qwen3.8:27b", "gemma3:12b", "qwen3:32b", "qwen3:30b", "qwen3:14b",
              "gemma4:31b", "gemma4:26b", "gemma4")
+    if cpu_mode():
+        # processzoron a kis modell: egy 15 perces videót kb. negyedóra alatt fordít le, a 27b-vel órákig tartana
+        prefs = ("gemma3:4b", "gemma3:12b") + prefs
     for p in prefs:
         for m in models:
             if m.startswith(p):
@@ -245,10 +248,36 @@ def bad_script(text, target="hu"):
     return any(c.isalpha() and "LATIN" not in unicodedata.name(c, "") for c in text)
 
 
-def _chat(model, system, user, timeout=600, temperature=0.2):
-    # "json" mód és nem kötött séma: a sémás (nyelvtannal kötött) mintavétel több furcsa szót hozott
+_param_cache = {}
+
+
+def model_params_b(model):
+    """A modell mérete milliárd paraméterben az Ollama szerint (pl. gemma3:4b -> 4.3), vagy None."""
+    if model not in _param_cache:
+        size = None
+        try:
+            r = requests.post(OLLAMA_URL + "/api/show", json={"model": model}, timeout=10)
+            m = re.match(r"([\d.]+)\s*([BM])", r.json().get("details", {}).get("parameter_size") or "")
+            if m:
+                size = float(m.group(1)) / (1000 if m.group(2) == "M" else 1)
+        except Exception:
+            pass
+        _param_cache[model] = size
+    return _param_cache[model]
+
+
+def _small_model(model):
+    """14 milliárd paraméter alatti modell (pl. gemma3:4b): nagy csoportnál elrontja a JSON-t, és ismétlésbe
+    kezd (mérve 120 valódi soron: 40 soros átnézésnél 3 hívásból 2 a tokenkorlátig írt)."""
+    size = model_params_b(model)
+    return size is not None and size < 14
+
+
+def _chat(model, system, user, timeout=600, temperature=0.2, max_tokens=8000):
+    # "json" mód és nem kötött séma: a sémás (nyelvtannal kötött) mintavétel több furcsa szót hozott.
+    # max_tokens: ha a modell ismétlésbe kezd, ne írja tele a teljes kontextust (processzoron az percekig tart)
     body = {"model": model, "stream": False, "think": False, "format": "json", "keep_alive": "10m",
-            "options": {"temperature": temperature, "num_ctx": 16384},
+            "options": {"temperature": temperature, "num_ctx": 16384, "num_predict": max_tokens},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     r = requests.post(OLLAMA_URL + "/api/chat", json=body, timeout=timeout)
     if r.status_code == 400 and "think" in r.text:      # nem gondolkodó modell: "think" nélkül
@@ -261,10 +290,14 @@ def _chat(model, system, user, timeout=600, temperature=0.2):
     return json.loads(m.group(0) if m else content)
 
 
-def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", batch=25, log=print,
+def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", batch=None, log=print,
                      progress=None, target="hu"):
     """Minden sorba "hu" kerül (a célnyelvi szöveg, a célnyelvtől függetlenül ez a kulcs). A sorokat
     csoportosan küldi, az előző csoport végével mint környezettel."""
+    if batch is None:
+        # kis modellnél 8 soros csoport (mérve a gemma3:4b-vel: 8 sorral 6 mp, 13 sorral 3 elszállt próba után
+        # soronként 55 mp)
+        batch = 8 if _small_model(model) else 25
     system = _system_prompt(src_lang, formality, notes, target)
     key = out_key(target)
     todo = [ln for ln in lines if not ln.get("hu")]
@@ -287,7 +320,7 @@ def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", ba
         got = {}
         for attempt in range(3):
             try:
-                data = _chat(model, system, user)
+                data = _chat(model, system, user, max_tokens=150 * len(chunk) + 300)   # soronként bő 3x tartalék
                 got = {int(t["id"]): str(t[key]).strip() for t in data.get("translations", []) if t.get(key)}
                 if all(ln["id"] in got for ln in chunk):
                     break
@@ -306,7 +339,7 @@ def translate_ollama(lines, model, src_lang="en", formality="auto", notes="", ba
             last = ""
             for attempt in range(3):
                 try:
-                    data = _chat(model, system, one, temperature=0.2 + 0.25 * attempt)
+                    data = _chat(model, system, one, temperature=0.2 + 0.25 * attempt, max_tokens=500)
                     last = clean_hu(data["translations"][0][key])
                     if last and not bad_script(last, target):
                         break
@@ -352,9 +385,11 @@ def hunglish_problems(line):
     return probs
 
 
-def review_ollama(lines, model, src_lang="en", formality="auto", notes="", batch=40, log=print, progress=None):
+def review_ollama(lines, model, src_lang="en", formality="auto", notes="", batch=None, log=print, progress=None):
     """Második kör: a kész magyar szöveg átnézése az eredetivel együtt (félrefordítás, tükörfordítás,
     furcsa mondat), és csak a hibás sorok javítása."""
+    if batch is None:
+        batch = 10 if _small_model(model) else 40
     src = lang_name(src_lang)
     system = (f"You are a senior Hungarian dubbing editor (szinkronrendező). You get {src} dialogue lines with "
               "a draft Hungarian dubbing translation. Check every line carefully:\n"
@@ -386,7 +421,7 @@ def review_ollama(lines, model, src_lang="en", formality="auto", notes="", batch
         user = ("Review these dubbing lines (in order). Lines with 'must_fix' have known problems that you MUST "
                 "fix; check all the other lines too.\n" + json.dumps(items, ensure_ascii=False))
         try:
-            data = _chat(model, system, user)
+            data = _chat(model, system, user, max_tokens=100 * len(chunk) + 300)
         except Exception as e:
             log(f"  az átnézés nem sikerült: {e}")
             continue
@@ -429,7 +464,7 @@ def fix_problems_ollama(lines, model, src_lang="en", formality="auto", notes="",
             user = ("Rewrite each line so that every problem in 'must_fix' disappears, while keeping the full "
                     "meaning of the original and natural spoken Hungarian.\n" + json.dumps(items, ensure_ascii=False))
             try:
-                data = _chat(model, system, user, temperature=0.3 + 0.2 * rnd)
+                data = _chat(model, system, user, temperature=0.3 + 0.2 * rnd, max_tokens=100 * len(chunk) + 300)
             except Exception as e:
                 log(f"  a javítás nem sikerült: {e}")
                 continue

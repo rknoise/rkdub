@@ -2,7 +2,7 @@
 
 # rkdubby – helyi magyar szinkron
 
-> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU, in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer.
+> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU (or, more slowly, on the CPU), in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer.
 
 Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizálja **az eredeti beszélők hangján**, a háttérzenét és a zajokat megtartva. Minden a saját gépeden fut, a videókártyádon (RTX 3090-en tesztelve). Internet csak a telepítéshez kell.
 
@@ -29,8 +29,8 @@ Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizál
 1. Futtasd az **`rkdub-telepito.exe`**-t (a `dist` mappában van, ez az egyetlen fájl kell hozzá).
 2. Válaszd ki a helyet (alapból `C:\rkdub`; olyan útvonal kell, amiben **nincs ékezet**), és nyomd meg a **Telepítés** gombot.
 3. A telepítő mindent letölt és beállít:
-   - Python és saját környezet, PyTorch NVIDIA-gyorsítással, a program csomagjai;
-   - **fordító AI:** Ollama (ha még nincs a gépen) és a **gemma3** fordítómodell a videókártyádhoz illő méretben (24 GB-on 27b, 12–16 GB-on 12b, kisebbnél 4b);
+   - Python és saját környezet, PyTorch NVIDIA-gyorsítással (NVIDIA-kártya nélkül a processzoros változata, lásd [Processzoros mód](#processzoros-mód-nvidia-kártya-nélkül)), a program csomagjai;
+   - **fordító AI:** Ollama (ha még nincs a gépen) és a **gemma3** fordítómodell a videókártyádhoz illő méretben (24 GB-on 27b, 12–16 GB-on 12b, kisebbnél és NVIDIA-kártya nélkül 4b);
    - beszéd- és hangmodellek (Whisper, OmniVoice, BS-Roformer);
    - asztali ikon, Start menü, eltávolító (a Windows *Telepített alkalmazások* listájában is megjelenik).
 4. A végén **rkdub indítása**.
@@ -44,6 +44,7 @@ Rendszergazdai jog nem kell, minden a saját felhasználódhoz kerül. Internet 
 | 20 GB-tól | gemma3:27b | kb. 32 GB | kb. 36 GB |
 | 11–20 GB | gemma3:12b | kb. 23 GB | kb. 28 GB |
 | 11 GB alatt | gemma3:4b | kb. 18 GB | kb. 23 GB |
+| nincs NVIDIA-kártya (processzoros mód) | gemma3:4b | kb. 15 GB | kb. 19 GB |
 
 Ha az Ollama már fent van a gépen, 1,7 GB-tal kevesebb; ha DeepL fordít helyi AI helyett (`/noollama`), az Ollama és a fordítómodell is kimarad.
 
@@ -51,7 +52,7 @@ Ha a letöltés megszakad, futtasd újra a telepítőt ugyanabba a mappába. A k
 
 A telepítő nincs digitálisan aláírva, ezért a Windows először figyelmeztethet („A Windows megvédte a számítógépet”): **További információ → Futtatás mindenképp**.
 
-Felügyelet nélkül: `rkdub-telepito.exe /auto [/dir=D:\rkdub] [/noollama] [/nomodels] [/noshortcut]`.
+Felügyelet nélkül: `rkdub-telepito.exe /auto [/dir=D:\rkdub] [/noollama] [/nomodels] [/noshortcut]`. A `/cpu` kapcsolóval NVIDIA-kártyás gépen is processzoros módban telepít (kipróbáláshoz).
 
 ### Kézzel
 
@@ -68,7 +69,7 @@ Ajánlott a **gemma3:27b** (a teszteken ez fordított a legtermészetesebben mag
 ## Használat
 
 1. **Bemeneti fájl:** húzd be a videót (mp4, mkv, mov, webm…) vagy a hangfájlt (wav, mp3, m4a…), vagy keresd ki a **Tallózás** gombbal. Nagy fájlnál gyorsabb a Tallózás vagy az elérési út, mert akkor nem kell feltölteni.
-2. **▶ Szinkronizálás indítása.** A folyamatjelző, a napló és a fejléc mutatja, hol tart. A fejlécben a videókártya terhelése, a videómemória és a hőmérséklet is látszik.
+2. **▶ Szinkronizálás indítása.** A folyamatjelző, a napló és a fejléc mutatja, hol tart. A fejlécben a videókártya terhelése, a videómemória és a hőmérséklet is látszik (processzoros módban a processzor terhelése és a memória).
 3. **Eredmény előnézet:** a kész videó jobb oldalt lejátszható, a **Magyar szinkron / Eredeti** gombbal lejátszás közben is átváltható a hang (a fogaskerékkel a lejátszási sebesség is állítható). Az **Elkészült fájlok** a `kesz` mappába kerülnek:
    - `név_magyar.mp4`: a szinkronizált videó (1. hangsáv magyar, 2. az eredeti; kérésre beágyazott magyar felirattal),
    - `név_magyar_hangsav.m4a`: csak a magyar hangsáv,
@@ -130,6 +131,32 @@ Mért adatok (40 mp-es, kétszereplős próbavideó, gemma3:27b):
 - Videómemória: lépésenként töltődnek be a modellek, a fordítás után az Ollama-modell kiürül a kártyáról. Minden szinkron külön folyamatban fut, a végén minden memória felszabadul.
 - Telepítés után internet nélkül is működik (a modellek helyben vannak; ha a `.models\letoltve.txt` fájlt törlöd, újra ellenőrzi őket).
 
+## Processzoros mód (NVIDIA-kártya nélkül)
+
+Ha a gépben nincs NVIDIA-videokártya, a telepítő ezt magától felismeri, és processzoros módban telepít: a PyTorch processzoros változatát (0,6 GB a 3,5 GB helyett) és a kis gemma3:4b fordítómodellt. A program ugyanaz, a fejlécben „Processzoros mód” látszik, és könnyített beállításokkal fut:
+
+- a hangmodell 16 lépéssel dolgozik 32 helyett, és ahol a processzor natívan tudja (AMD Ryzen 7000-től, Zen 4), bfloat16 számítással. A teszten ugyanolyan érthető és ugyanannyira hasonló hangot adott, 3,4-szer gyorsabban;
+- a kész sorokat nem hallgatja vissza a Whisperrel (processzoron ez soronként kb. 7 mp lenne). A sorokat a felületen meghallgathatod, és egyenként újragenerálhatod;
+- a beszéd és a háttér szétválasztása kisebb átfedéssel fut: 1,8-szer gyorsabb, a beszédsáv gyakorlatilag ugyanaz;
+- fordításra a gemma3:4b-t választja: a 27b processzoron órákig fordítana, és 16 GB memóriába el sem fér. A 4b magyarja viszont érezhetően gyengébb, ezért processzoron jobb a **DeepL** (ingyenes kulccsal is, és egy perc alatt kész), vagy a fordítás javíttatása (export / import).
+
+Mért adatok (Ryzen 7 7800X3D, csak processzor, ugyanaz a 40 mp-es próbavideó):
+
+| Lépés | Idő |
+|---|---|
+| Beszéd és háttér szétválasztása | ~150 mp |
+| Beszédfelismerés | ~20 mp |
+| Beszélők azonosítása | ~10 mp |
+| Fordítás + átnézés (gemma3:4b, processzoron) | ~80 mp |
+| Magyar hang (13 sor) | ~325 mp (kb. 17 mp/sor) |
+| **Összesen** | **~10 perc** |
+
+Egy végig beszédes 15 perces videó ezen a gépen kb. 3–4 óra, egy laptopon akár ennek a kétszerese: érdemes éjszakára elindítani. Intel processzorokon (és a Zen 4 előtti AMD-ken) nincs bfloat16, ott a hang készítése kb. 1,7-szer lassabb. Memóriából 16 GB elég.
+
+**Integrált videokártya (iGPU):** a hangmodell és a hangleválasztó Windowson nem tudja használni, ezek a processzoron futnak. A fordító AI (Ollama) a Vulkan-motorjával elvileg igen, de alapból kihagyja az integrált kártyát; az `OLLAMA_IGPU_ENABLE=1` környezeti változóval és az Ollama újraindításával bekapcsolható (nincs kipróbálva).
+
+NVIDIA-kártyás gépen is kipróbálható: `start.bat --cpu` (a telepítőnél `/cpu`).
+
 ## Korlátok
 
 - **Más célnyelvek:** a program a magyarra van a leginkább hangolva. Magyar célnyelvnél egy külön kör kijavítja a tükörfordításokat, és a számokat, rövidítéseket, neveket magyar kiejtés szerint írja ki. Más célnyelvnél ez a két lépés kimarad, a hangmodell maga olvassa fel a számokat.
@@ -142,7 +169,7 @@ Mért adatok (40 mp-es, kétszereplős próbavideó, gemma3:27b):
 ## Parancssor
 
 ```
-.venv\Scripts\python.exe rkdub.py --cli video.mp4 [--speakers 2] [--deepl] [--model gemma3:27b] [--ref speaker] [--source fr] [--target hu]
+.venv\Scripts\python.exe rkdub.py --cli video.mp4 [--speakers 2] [--deepl] [--model gemma3:27b] [--ref speaker] [--source fr] [--target hu] [--cpu]
 ```
 
 ## Próba

@@ -14,6 +14,7 @@ TTS_SR = 24000
 MAX_SPEEDUP = 1.35             # ennél jobban nem gyorsítjuk a beszédet (utána: rövidebb fordítás)
 QC_MAX_CER = 0.2               # a visszahallgatott szöveg ennyiben térhet el a várttól
 QC_MODEL = "large-v3"          # magyarul jóval pontosabb a turbónál (kevesebb téves riasztás)
+CPU_NUM_STEP = 16              # processzoron fele annyi lépés (32 helyett): a mérésen ugyanolyan érthető és hasonló
 FIT_SLACK = 0.35               # ennyivel (mp) nyúlhat túl egy sor a helyén
 # A "magyarosított" hangminta szövege: természetes, sokféle magyar hangot tartalmazó, kb. 8 mp-es mondat.
 ANCHOR_TEXT = ("Sziasztok! Ma egy nagyon izgalmas dologról szeretnék mesélni nektek, "
@@ -175,22 +176,41 @@ def speak_for(text, lang):
     return speakable(text) if lang == "hu" else text
 
 
+def _cpu_bf16(torch):
+    try:
+        return bool(torch.cpu._is_avx512_bf16_supported())
+    except Exception:
+        return False
+
+
 class HungarianVoice:
     """A célnyelvi hang (a név a magyar kezdetekből maradt; a nyelv a `lang`)."""
 
-    def __init__(self, log=print, qc=True, num_step=32, tempo=1.0, lang="hu"):
+    def __init__(self, log=print, qc=True, num_step=None, tempo=1.0, lang="hu"):
         import torch
         from omnivoice import OmniVoice
 
         self.lang = lang
         self.torch = torch
         self.log = log
-        self.num_step = num_step
         self.tempo = float(tempo or 1.0)        # beszédtempó (1.0 = a beszélő természetes tempója)
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        log("Hangmodell betöltése (OmniVoice)...")
+        cpu = self.device == "cpu"
+        self.num_step = num_step or (CPU_NUM_STEP if cpu else 32)
+        # bfloat16 csak ott, ahol a processzor natívan tudja (AMD Zen 4-től): ott 1,7x gyorsabb, máshol lassítana
+        self.bf16 = cpu and _cpu_bf16(torch)
+        note = (f", processzoron: {self.num_step} lépés" + (", bfloat16" if self.bf16 else "")) if cpu else ""
+        log(f"Hangmodell betöltése (OmniVoice{note})...")
         self.model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map=self.device,
                                                dtype=torch.float16 if self.device != "cpu" else torch.float32)
+        if self.bf16:
+            decode = self.model._decode_and_post_process
+
+            def fp32_decode(*a, **k):           # a hangdekóder fp32-ben fut (a bf16 kimenetet a numpy nem ismeri)
+                with torch.autocast("cpu", enabled=False):
+                    return decode(*a, **k)
+
+            self.model._decode_and_post_process = fp32_decode
         self.prompts = {}
         self.asr = None
         if qc:
@@ -220,7 +240,8 @@ class HungarianVoice:
             kw["duration"] = float(duration)
         elif abs(sp - 1.0) > 0.01:
             kw["speed"] = sp
-        y = self.model.generate(**kw)[0]
+        with self.torch.autocast("cpu", dtype=self.torch.bfloat16, enabled=self.bf16):
+            y = self.model.generate(**kw)[0]
         return np.asarray(y, dtype=np.float32).reshape(-1)
 
     def lang_prob(self, y, lang=None):

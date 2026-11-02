@@ -102,6 +102,33 @@ def save_settings(data):
     write_json(SETTINGS_PATH, data)
 
 
+def apply_cpu_override():
+    """RKDUB_CPU=1: processzoron fut akkor is, ha van NVIDIA-kártya (a processzoros mód kipróbálásához).
+    A torch importja ELŐTT kell hívni; a feladatot futtató gyerekfolyamat örökli."""
+    if os.environ.get("RKDUB_CPU") == "1":
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"      # az üres érték Windowson törölné a változót
+
+
+_cpu_mode = None
+
+
+def cpu_mode():
+    """Nincs használható NVIDIA-kártya (vagy RKDUB_CPU=1): a szinkron processzoron, könnyített beállításokkal
+    fut. Az nvidia-smi alapján dönt, a torch betöltése nélkül (a felületnek is gyorsan kell)."""
+    global _cpu_mode
+    if _cpu_mode is None:
+        _cpu_mode = True
+        exe = shutil.which("nvidia-smi")
+        if exe and os.environ.get("RKDUB_CPU") != "1":
+            try:
+                out = subprocess.run([exe, "-L"], capture_output=True, text=True, timeout=10,
+                                     creationflags=NO_WINDOW).stdout
+                _cpu_mode = "GPU" not in out
+            except Exception:
+                pass
+    return _cpu_mode
+
+
 def free_gpu():
     gc.collect()
     try:

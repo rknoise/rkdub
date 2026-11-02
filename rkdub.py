@@ -36,7 +36,13 @@ def main():
     ap.add_argument("--port", type=int, default=7870)
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--classic", action="store_true", help="a régi (Gradio-s) felület")
+    ap.add_argument("--cpu", action="store_true", help="processzoron fut akkor is, ha van NVIDIA-kártya")
     a = ap.parse_args()
+    if a.cpu:
+        os.environ["RKDUB_CPU"] = "1"
+    from dub.util import apply_cpu_override
+
+    apply_cpu_override()
     if a.cli:
         from dub.pipeline import DubJob
         from dub.worker import JobProcess

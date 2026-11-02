@@ -25,6 +25,7 @@ def drop_broken_model():
 def separate(mix_wav, out_dir, log=print):
     """-> (vocals.wav, background.wav) az out_dir-ben, a bemenettel azonos mintavétellel."""
     ensure_ffmpeg_on_path()
+    import torch
     from audio_separator.separator import Separator
 
     os.makedirs(MODEL_DIR, exist_ok=True)
@@ -32,9 +33,14 @@ def separate(mix_wav, out_dir, log=print):
         log("A BS-Roformer modellfájl csonka volt (megszakadt letöltés), újra letöltöm...")
     tmp = os.path.join(out_dir, "_sep")
     os.makedirs(tmp, exist_ok=True)
-    log("Beszéd és háttér szétválasztása (BS-Roformer)...")
+    kw = {}
+    if not torch.cuda.is_available():
+        # processzoron 2-es átfedés (a modell alapértéke 4): 1,8x gyorsabb, a beszédsáv gyakorlatilag ugyanaz
+        kw["mdxc_params"] = {"segment_size": 256, "override_model_segment_size": False, "batch_size": None,
+                             "overlap": 2, "pitch_shift": 0}
+    log("Beszéd és háttér szétválasztása (BS-Roformer" + (", processzoron" if kw else "") + ")...")
     sep = Separator(output_dir=tmp, output_format="WAV", model_file_dir=MODEL_DIR,
-                    log_level=logging.WARNING, use_autocast=True)
+                    log_level=logging.WARNING, use_autocast=True, **kw)
     sep.load_model(model_filename=SEP_MODEL)
     files = sep.separate(mix_wav, {"Vocals": "vocals", "Instrumental": "background"})
     del sep

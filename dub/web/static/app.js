@@ -265,6 +265,11 @@ function showGpu(g) {
     drawSpark();
     $("gpu-mem").textContent = `${g.mem_used.toFixed(1)} / ${g.mem_total.toFixed(1)} GB`;
     $("vram-bar").style.width = Math.min(100, (g.mem_used / (g.mem_total || 1)) * 100) + "%";
+    if (g.cpu) {        // processzoros mód: a processzor terhelése és a gép memóriája, hőmérséklet nélkül
+        $("mem-label").textContent = "Memória (RAM)";
+        $("gpu-name").title = "Nincs NVIDIA-kártya: a szinkron processzoron készül, lassabban.";
+        return;
+    }
     const t = g.temp;
     const color = t >= 80 ? "text-red-400" : t >= 70 ? "text-amber-400" : "text-emerald-400";
     $("gpu-temp").textContent = `${t} °C`;

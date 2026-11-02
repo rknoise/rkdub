@@ -1,9 +1,11 @@
 ﻿# rkdub telepítő: mindent a projektmappába tesz (Python, PyTorch CUDA-val, csomagok, modellek), telepíti a
 # fordító AI-t (Ollama + a videókártyához illő gemma3 modell), asztali ikont és eltávolítót készít.
+# NVIDIA-kártya nélkül processzoros módban telepít: a PyTorch processzoros változatát és a kis gemma3:4b-t.
 # Előre telepített Python nem kell hozzá. Rendszergazdai jog sem kell (minden a felhasználóhoz kerül).
 #
 # Indítás: rkdub-telepito.exe (grafikus), install.bat, vagy:
 #   powershell -ExecutionPolicy Bypass -File tools\install.ps1 [-NoOllama] [-NoModels] [-NoShortcut] [-OllamaModel gemma3:12b]
+#   (-Cpu: processzoros mód akkor is, ha van NVIDIA-kártya; a kipróbálásához)
 # A grafikus telepítő (RKDUB_GUI=1) a "##" kezdetű sorokból rajzolja a folyamatjelzőt:
 #   ##PLAN azonosító bájt név   a telepítés egy része (induláskor mindet felsoroljuk)
 #   ##PART azonosító            ez a rész indul
@@ -13,7 +15,7 @@
 #   ##END azonosító             ez a rész kész
 #   ##DONE, ##FAIL szöveg       a telepítés vége
 
-param([switch]$NoModels, [switch]$NoShortcut, [switch]$NoOllama, [string]$OllamaModel = 'auto')
+param([switch]$NoModels, [switch]$NoShortcut, [switch]$NoOllama, [string]$OllamaModel = 'auto', [switch]$Cpu)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -33,9 +35,11 @@ $env:UV_LINK_MODE = 'copy'
 $env:HF_HUB_DISABLE_PROGRESS_BARS = '1'
 $env:HF_HUB_VERBOSITY = 'error'
 $env:TQDM_DISABLE = '1'
+$TorchTag = 'cu128'
 $TorchIndex = 'https://download.pytorch.org/whl/cu128'
 $TorchWheel = 'torch-2.8.0+cu128-cp312-cp312-win_amd64.whl'
 $TorchSha256 = '0ad925202387f4e7314302a1b4f8860fa824357f9b1466d7992bf276370ebcff'
+$TorchBytes = 3461000000
 $Constraints = Join-Path $Tools 'constraints.txt'
 $Overrides = Join-Path $Tools 'overrides.txt'
 $Steps = 7
@@ -219,10 +223,17 @@ try {
         Write-Host 'Figyelem: ékezet van a mappa útvonalában. Ha hibát látsz, tedd a mappát pl. ide: C:\rkdub' -ForegroundColor Yellow
     }
     $gpuMiB = Gpu-MemMiB
+    if ($Cpu) { $gpuMiB = 0 }
     if ($gpuMiB -gt 0) {
         Write-Host ("Videókártya: NVIDIA, {0:N0} GB videómemória" -f ($gpuMiB / 1024))
     } else {
-        Write-Host 'Figyelem: nem találtam NVIDIA videokártyát. A program CPU-n is elindul, de nagyon lassú lesz.' -ForegroundColor Yellow
+        Write-Host 'Nem találtam NVIDIA-videokártyát: processzoros módban telepítek. A szinkron így is elkészül, csak lassabban (egy 15 perces videó kb. 3-8 óra).' -ForegroundColor Yellow
+        # a PyTorch processzoros változata: 0,6 GB a CUDA-s 3,5 GB helyett
+        $TorchTag = 'cpu'
+        $TorchIndex = 'https://download.pytorch.org/whl/cpu'
+        $TorchWheel = 'torch-2.8.0+cpu-cp312-cp312-win_amd64.whl'
+        $TorchSha256 = '2be20b2c05a0cce10430cc25f32b689259640d273232b2de357c35729132256d'
+        $TorchBytes = 622000000
     }
     if ($OllamaModel -eq 'auto') {
         # a videókártyához illő méret: a fordítás közben a teljes modellnek el kell férnie a videómemóriában
@@ -232,7 +243,7 @@ try {
     # a részek várható mérete (bájt); a letöltők a pontos értékkel felülírják
     Emit 'PLAN uv 15000000 Telepítő eszköz (uv)'
     Emit 'PLAN python 22000000 Python 3.12'
-    Emit 'PLAN torch 3461000000 PyTorch (NVIDIA-gyorsítás)'
+    if ($TorchTag -eq 'cpu') { Emit "PLAN torch $TorchBytes PyTorch (processzoros)" } else { Emit "PLAN torch $TorchBytes PyTorch (NVIDIA-gyorsítás)" }
     Emit 'PLAN packages 320000000 Python-csomagok'
     if (-not $NoOllama) {
         Emit 'PLAN ollama 1680000000 Ollama (a fordító AI futtatója)'
@@ -271,14 +282,15 @@ try {
     Check 'A Python-környezet létrehozása'
     Emit 'END python'
 
-    Step 3 'PyTorch NVIDIA-gyorsítással...'
-    Set-Content -Encoding ascii $Constraints "torch==2.8.0+cu128`ntorchaudio==2.8.0+cu128`ntorchvision==0.23.0+cu128"
+    if ($TorchTag -eq 'cpu') { Step 3 'PyTorch (processzoros változat)...' } else { Step 3 'PyTorch NVIDIA-gyorsítással...' }
+    Set-Content -Encoding ascii $Constraints "torch==2.8.0+$TorchTag`ntorchaudio==2.8.0+$TorchTag`ntorchvision==0.23.0+$TorchTag"
     $site = Join-Path $Venv 'Lib\site-packages'
-    if ((Test-Path (Join-Path $site 'torch-2.8.0+cu128.dist-info')) -and (Test-Path (Join-Path $site 'torchaudio-2.8.0+cu128.dist-info'))) {
+    if ((Test-Path (Join-Path $site "torch-2.8.0+$TorchTag.dist-info")) -and (Test-Path (Join-Path $site "torchaudio-2.8.0+$TorchTag.dist-info"))) {
         Write-Host '  A PyTorch már telepítve van.'
         Emit 'SKIP torch'
     } else {
-        # a torch önmagában 3,5 GB: külön töltjük le, így pontos a folyamatjelző, és megszakadás után folytatható
+        # a torch önmagában 3,5 GB (processzoros: 0,6 GB): külön töltjük le, így pontos a folyamatjelző, és
+        # megszakadás után folytatható
         Emit 'PART torch'
         $whl = Join-Path $Tools $TorchWheel
         Download-File 'torch' 'PyTorch' "$TorchIndex/$($TorchWheel -replace '\+', '%2B')" $whl
@@ -288,7 +300,7 @@ try {
             throw 'a PyTorch letöltött fájlja hibás, futtasd újra a telepítőt'
         }
         Part-Work 'torch' 'Kicsomagolás, ez több percig is eltarthat...'
-        Native { & $uv pip install --python $Py $whl torchaudio==2.8.0+cu128 --index-url $TorchIndex }
+        Native { & $uv pip install --python $Py $whl "torchaudio==2.8.0+$TorchTag" --index-url $TorchIndex }
         Check 'A PyTorch telepítése'
         Remove-Item $whl
         Emit 'END torch'

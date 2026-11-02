@@ -18,8 +18,8 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("rkdub telepítő")]
 [assembly: AssemblyProduct("rkdub - helyi magyar szinkron")]
-[assembly: AssemblyVersion("1.2.4.0")]
-[assembly: AssemblyFileVersion("1.2.4.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 static class Program
 {
@@ -58,12 +58,13 @@ class SetupForm : Form
     const string FeedbackMail = "rknoise@gmail.com";
     const string WelcomeHu = "Helló! Ez a program RKnoise szüleménye.\r\n\r\n" +
         "Az rkdub magyarra szinkronizálja az angol (vagy más nyelvű) videókat és hangfájlokat, az eredeti beszélők " +
-        "hangján, a háttérzene és a zajok megtartásával. Olyan, mint az ElevenLabs Dubbing, csak a saját gépeden, " +
-        "a saját videókártyádon fut. Internet csak a telepítéshez kell.";
+        "hangján, a háttérzene és a zajok megtartásával. Olyan, mint az ElevenLabs Dubbing, csak a saját gépeden " +
+        "fut: NVIDIA-videokártyával gyorsan, nélküle a processzoron, lassabban. Internet csak a telepítéshez kell.";
     const string WelcomeEn = "Hello! This program is RKnoise's creation.\r\n\r\n" +
         "rkdub dubs English (or other language) videos and audio files into Hungarian in the original speakers' " +
         "voices, keeping the background music and noises. It works like ElevenLabs Dubbing, but it runs on your " +
-        "own computer and graphics card. You only need internet for the installation.";
+        "own computer: fast with an NVIDIA graphics card, slower on the processor without one. You only need " +
+        "internet for the installation.";
     const string FeedbackHu = "Visszajelzést az " + FeedbackMail + " címre kérek, a tárgyba írd: dubby";
     const string FeedbackEn = "Please send feedback to " + FeedbackMail + " with the subject: dubby";
 
@@ -90,6 +91,7 @@ class SetupForm : Form
     StreamWriter logFile;
     string gpuName = "";
     int gpuMiB = 0, fakeVram = 0;
+    bool forceCpu;
 
     // folyamatjelző: minden mező a felület szálán változik
     readonly List<Part> parts = new List<Part>();
@@ -111,6 +113,7 @@ class SetupForm : Form
             if (l == "/auto") auto = true;
             else if (l.StartsWith("/shot=")) shot = a.Substring(6).Trim('"');   // fejlesztéshez: az ablak képe PNG-be
             else if (l.StartsWith("/vram=")) int.TryParse(a.Substring(6), out fakeVram);   // fejlesztéshez: más méretű videókártya
+            else if (l == "/cpu") forceCpu = true;   // fejlesztéshez: processzoros mód NVIDIA-kártya mellett is
             else if (l.StartsWith("/dir=")) dir = a.Substring(5).Trim('"');
             else if (l == "/noollama") noOllama = true;
             else if (l == "/nomodels") noModels = true;
@@ -318,6 +321,7 @@ class SetupForm : Form
         }
         catch { }
         if (fakeVram > 0) gpuMiB = fakeVram;
+        if (forceCpu) { gpuName = ""; gpuMiB = 0; }
     }
 
     string AutoModel()
@@ -337,7 +341,8 @@ class SetupForm : Form
 
     double DownloadGb()
     {
-        double gb = 3.85;                                           // uv, Python, PyTorch, csomagok
+        // uv, Python, PyTorch, csomagok; NVIDIA nélkül a PyTorch processzoros változata 0,6 GB a 3,5 GB helyett
+        double gb = gpuName.Length > 0 ? 3.85 : 1.01;
         if (chkOllama.Checked) gb += (OllamaInstalled() ? 0 : 1.68) + AutoModelGb();
         if (chkModels.Checked) gb += 9.11;
         return gb;
@@ -362,7 +367,7 @@ class SetupForm : Form
         }
         else
         {
-            gpuLabel.Text = "Nem találtam NVIDIA videokártyát: a program elindul, de nagyon lassú lesz (a szinkronhoz NVIDIA kell).";
+            gpuLabel.Text = "Nincs NVIDIA-videokártya: processzoros módban telepítek, lassabb (egy 15 perces videó kb. 3–8 óra).";
             gpuLabel.ForeColor = Amber;
         }
         string dir = dirBox.Text.Trim();
@@ -374,14 +379,15 @@ class SetupForm : Form
             string root = Path.GetPathRoot(Path.GetFullPath(dir));
             DriveInfo d = new DriveInfo(root);
             // mért értékek: .venv 8 GB, modellek 9 GB, Ollama 3 GB; a csomagok telepítése közben a uv-gyorsítótár is 8 GB
-            long need = 8L << 30;
+            // (processzoros módban a .venv és a gyorsítótár kisebb, mert nincs benne a CUDA)
+            long need = (gpuName.Length > 0 ? 8L : 4L) << 30;
             if (chkModels.Checked) need += 9L << 30;
             if (chkOllama.Checked)
             {
                 need += (long)(AutoModelGb() * 1e9);
                 if (!OllamaInstalled()) need += 3L << 30;
             }
-            need = Math.Max(need, 16L << 30);
+            need = Math.Max(need, (gpuName.Length > 0 ? 16L : 8L) << 30);
             string txt = "Szabad hely a " + root.TrimEnd('\\') + " meghajtón: " + Gb(d.AvailableFreeSpace) + " (kell kb. " + Gb(need) + ")";
             if (chkOllama.Checked)
                 txt += "  ·  benne a fordítómodell: " + AutoModel();
@@ -428,6 +434,7 @@ class SetupForm : Form
         if (!chkOllama.Checked) args += " -NoOllama";
         if (!chkModels.Checked) args += " -NoModels";
         if (!chkShortcut.Checked) args += " -NoShortcut";
+        if (forceCpu) args += " -Cpu";
         Thread t = new Thread(delegate() { Work(dir, args); });
         t.IsBackground = true;
         t.Start();

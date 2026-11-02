@@ -10,7 +10,7 @@ import time
 import numpy as np
 
 from . import media
-from .util import OUT_DIR, WORK_DIR, fmt_time, free_gpu, read_json, short_err, write_json
+from .util import OUT_DIR, WORK_DIR, cpu_mode, fmt_time, free_gpu, read_json, short_err, write_json
 
 DEFAULT_OPTIONS = {
     "translator": "ollama",          # ollama | deepl
@@ -80,6 +80,8 @@ class DubJob:
     def __init__(self, src, options=None, log=print, progress=None, cancel=None, job_dir=None):
         self.src = os.path.abspath(src)
         self.opt = dict(DEFAULT_OPTIONS, **(options or {}))
+        if "qc" not in (options or {}) and cpu_mode():
+            self.opt["qc"] = False             # a visszahallgatás processzoron soronként kb. 7 mp lenne
         self._log = log
         self._progress = progress
         self.cancel = cancel                       # threading.Event (megszakítás)
@@ -141,6 +143,9 @@ class DubJob:
     # --- futtatás -------------------------------------------------------------
     def run(self, until=None):
         t_all = time.time()
+        if cpu_mode():
+            self.log("Figyelem: processzoros mód (nincs NVIDIA-kártya). Könnyített beállításokkal fut, de így is "
+                     "jóval lassabb: egy 15 perces videó kb. 3-8 óra.")
         if until is None and self.opt.get("stop_after_translate"):
             until = "translate"                # átnézés / export-import a hang készítése előtt
         if self.opt.get("mode") == "srt":
@@ -546,8 +551,11 @@ class DubJob:
                     sim_fn = lambda y, t=target: float(emb.embed(librosa.resample(y, orig_sr=24000, target_sr=16000)) @ t)  # noqa: E731
                 y, c, ph, sim = voice.hu_anchor(voice.prompt(ekey, eaudio, etext), sim_fn)
                 sf.write(path, y, 24000)
-                self.log(f"  célnyelvi hangminta, {spk + 1}. beszélő: célnyelvi {ph:.0%}, "
-                         f"hasonlóság {sim:.2f}, eltérés {c:.0%}")
+                if voice.asr is None:            # visszahallgatás nélkül nincs mit kiírni (processzoros mód)
+                    self.log(f"  célnyelvi hangminta, {spk + 1}. beszélő: kész")
+                else:
+                    self.log(f"  célnyelvi hangminta, {spk + 1}. beszélő: célnyelvi {ph:.0%}, "
+                             f"hasonlóság {sim:.2f}, eltérés {c:.0%}")
             made[key] = (torch.from_numpy(np.ascontiguousarray(y, dtype=np.float32)), 24000)
         if emb is not None:
             emb.close()
