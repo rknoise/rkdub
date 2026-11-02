@@ -34,6 +34,7 @@ DEFAULT_OPTIONS = {
     "asr_model": "large-v3-turbo",   # beszédfelismerő: large-v3-turbo (gyors) | large-v3 (pontosabb)
     "tempo": 1.0,                    # beszédtempó a magyar hangnál (1.0 = a beszélő természetes tempója)
     "mode": "dub",                   # dub: szinkron | srt: csak felirat az eredeti nyelven (pl. dalszöveghez)
+    "srt_hu": False,                 # csak felirat módban: magyar fordítás is (<név>.hu.srt)
 }
 
 STAGES = [("prepare", 2), ("separate", 12), ("transcribe", 8), ("speakers", 3), ("translate", 15),
@@ -43,6 +44,7 @@ STAGE_NAMES = {"prepare": "Előkészítés", "separate": "Beszéd és háttér s
                "translate": "Fordítás", "synthesize": "Magyar hang készítése", "mix": "Keverés és mentés",
                "subtitles": "Felirat mentése"}
 SRT_STAGES = [("prepare", 5), ("separate", 45), ("transcribe", 45), ("subtitles", 5)]
+SRT_HU_STAGES = [("prepare", 5), ("separate", 30), ("transcribe", 30), ("subtitles", 35)]   # a fordítással
 LINE_REF_MIN = 4.0       # ennél rövidebb sornál a beszélő összesített hangmintája a referencia
 SPK_REF_TARGET = 8.0     # a beszélőnkénti hangminta hossza (mp)
 REF_MAX = 11.0
@@ -91,7 +93,10 @@ class DubJob:
         self.state.setdefault("sigs", {})
         self.state["src"] = self.src
         self._stage_i = 0
-        self.stages = SRT_STAGES if self.opt.get("mode") == "srt" else STAGES
+        if self.opt.get("mode") == "srt":
+            self.stages = SRT_HU_STAGES if self.opt.get("srt_hu") else SRT_STAGES
+        else:
+            self.stages = STAGES
 
     # --- segédek --------------------------------------------------------------
     def p(self, name):
@@ -212,8 +217,62 @@ class DubJob:
         path = os.path.join(OUT_DIR, safe_stem(self.src) + ".srt")
         to_srt(subs, path, "text")
         self.state["srt_result"] = {"srt_only": path, "lines": len(subs), "lang": data["lang"]}
-        self.save_state()
         self.log(f"Kész a felirat: {path} ({len(subs)} sor, nyelv: {data['lang']})")
+        if self.opt.get("srt_hu"):
+            if data["lang"] == "hu":
+                self.log("A felvétel magyar nyelvű, nincs mit fordítani.")
+            else:
+                hu_path = os.path.join(OUT_DIR, safe_stem(self.src) + ".hu.srt")
+                self._translate_subs(subs, data["lang"])
+                to_srt(subs, hu_path, "hu")
+                self.state["srt_result"]["srt_hu"] = hu_path
+                self.log(f"Kész a magyar felirat: {hu_path}")
+        self.save_state()
+
+    def _translate_subs(self, subs, lang):
+        """A feliratsorok magyarul ("hu"), a szinkronnal azonos fordítóval; az időzítés nem változik."""
+        from . import translate as tr
+        from .transcribe import wrap_two
+
+        lines = [{"id": i, "en": " ".join(s["text"].split()), "start": s["start"], "end": s["end"]}
+                 for i, s in enumerate(subs)]
+        prog = lambda f: self.progress(f, "Felirat fordítása")    # noqa: E731
+        o = self.opt
+        if o["translator"] == "deepl":
+            key = o.get("deepl_key") or tr.load_deepl_key({})
+            if not key:
+                raise RuntimeError("nincs DeepL-kulcs (a magyar felirathoz fordító kell)")
+            tr.translate_deepl(lines, key, src_lang=lang, formality=o["formality"], log=self.log, progress=prog)
+        else:
+            model = self._ollama_model(tr)
+            free_gpu()
+            self.log(f"Felirat fordítása helyi AI-val: {model}")
+            try:
+                tr.translate_ollama(lines, model, src_lang=lang, formality=o["formality"], notes=o["notes"],
+                                    log=self.log, progress=prog)
+            finally:
+                tr.unload_ollama(model)
+        for s, ln in zip(subs, lines):
+            s["hu"] = wrap_two(ln.get("hu") or "")
+
+    def _ollama_model(self, tr):
+        """A választott (vagy, ha nincs meg, a legjobb elérhető) Ollama-modell neve."""
+        o = self.opt
+        if not tr.ensure_ollama(self.log):
+            raise RuntimeError("az Ollama nem fut, és nem is tudtam elindítani")
+        available = tr.ollama_models()
+        if not available:
+            raise RuntimeError("az Ollama fut, de nem lát egyetlen modellt sem. Ha a modelljeid másik mappában "
+                               "vannak (Ollama beállítások: Model location), lépj ki az Ollamából a tálcán, és "
+                               "indítsd újra; ha még nincs modelled: ollama pull gemma3:27b")
+        model = o["ollama_model"]
+        if model not in available:
+            if model:
+                self.log(f"A választott modell ({model}) nincs meg az Ollamában, helyette: "
+                         f"{tr.pick_default_model(available)}")
+            model = tr.pick_default_model(available)
+            o["ollama_model"] = model
+        return model
 
     # 4. beszélők
     def speakers(self):
@@ -264,19 +323,7 @@ class DubJob:
                 finally:
                     tr.unload_ollama(pmodel)
         else:
-            if not tr.ensure_ollama(self.log):
-                raise RuntimeError("az Ollama nem fut, és nem is tudtam elindítani")
-            available = tr.ollama_models()
-            if not available:
-                raise RuntimeError("az Ollama fut, de nem lát egyetlen modellt sem. Ha a modelljeid másik mappában "
-                                   "vannak (Ollama beállítások: Model location), lépj ki az Ollamából a tálcán, és "
-                                   "indítsd újra; ha még nincs modelled: ollama pull gemma3:27b")
-            if model not in available:
-                if model:
-                    self.log(f"A választott modell ({model}) nincs meg az Ollamában, helyette: "
-                             f"{tr.pick_default_model(available)}")
-                model = tr.pick_default_model(available)
-                o["ollama_model"] = model
+            model = self._ollama_model(tr)
             free_gpu()
             self.log(f"Fordítás helyi AI-val: {model}")
             try:

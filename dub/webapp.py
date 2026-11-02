@@ -33,7 +33,7 @@ ASR_MODELS = [("large-v3-turbo", "large-v3-turbo (gyors, ajánlott)"), ("large-v
 OPTION_KEYS = ["translator", "ollama_model", "deepl_key", "formality", "num_speakers", "speaker_genders",
                "ref_mode", "notes",
                "keep_background", "keep_nonspeech", "keep_original_track", "subtitles", "stop_after_translate",
-               "asr_model", "tempo"]
+               "asr_model", "tempo", "srt_hu"]
 
 
 def _level(msg):
@@ -107,7 +107,8 @@ class AppState:
             elif res.get("srt_only"):
                 self.status, self.result = "done", res
                 self.message = (f"Kész a felirat: {res.get('lines', 0)} sor ({res.get('lang', '')}), "
-                                f"{os.path.basename(res['srt_only'])}")
+                                f"{os.path.basename(res['srt_only'])}"
+                                + (f" és {os.path.basename(res['srt_hu'])}" if res.get("srt_hu") else ""))
             elif res.get("stopped"):
                 self.status, self.result = "review", res
                 self.message = (f"A fordítás kész ({res.get('lines', 0)} sor). Nézd át lent, vagy exportáld "
@@ -198,7 +199,8 @@ def _options(body):
     g = o.get("speaker_genders") or []
     o["speaker_genders"] = [x for x in g if x in ("f", "m")][: o["num_speakers"]] if isinstance(g, list) else []
     o["tempo"] = float(o.get("tempo") or 1.0)
-    for k in ("keep_background", "keep_nonspeech", "keep_original_track", "subtitles", "stop_after_translate"):
+    for k in ("keep_background", "keep_nonspeech", "keep_original_track", "subtitles", "stop_after_translate",
+              "srt_hu"):
         o[k] = bool(o.get(k))
     S.settings.update(o)
     saved = dict(S.settings)
@@ -477,6 +479,7 @@ def api_files():
              (res.get("srt"), "srt", "Magyar felirat"),
              (os.path.join(OUT_DIR, stem + "_eredeti.srt"), "srt", "Eredeti felirat"),
              ((st.get("srt_result") or {}).get("srt_only"), "srt", "Felirat (eredeti nyelv)"),
+             ((st.get("srt_result") or {}).get("srt_hu"), "srt", "Magyar felirat (csak felirat mód)"),
              (script.export_path(S.job), "txt", "Szinkronszöveg (export)")]
     files = []
     for path, kind, label in cands:

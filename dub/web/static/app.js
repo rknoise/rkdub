@@ -48,6 +48,7 @@ const TOGGLES = [
     ["keep_original_track", "Eredeti hang 2. hangsávként a videóban"],
     ["subtitles", "Magyar felirat beágyazása a videóba"],
     ["stop_after_translate", "Megállás a fordítás után (átnézés, export/import a hang előtt)"],
+    ["srt_hu", "Csak felirat (SRT) gombnál magyar fordítás is (.hu.srt)"],
 ];
 
 function buildToggles() {
