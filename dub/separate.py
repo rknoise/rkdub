@@ -6,7 +6,7 @@ import os
 import shutil
 import zipfile
 
-from .util import ROOT, free_gpu
+from .util import ROOT, ensure_ffmpeg_on_path, free_gpu
 
 SEP_MODEL = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"   # BS-Roformer-Viperx-1297
 MODEL_DIR = os.path.join(ROOT, ".models", "separator")
@@ -24,6 +24,7 @@ def drop_broken_model():
 
 def separate(mix_wav, out_dir, log=print):
     """-> (vocals.wav, background.wav) az out_dir-ben, a bemenettel azonos mintavétellel."""
+    ensure_ffmpeg_on_path()
     from audio_separator.separator import Separator
 
     os.makedirs(MODEL_DIR, exist_ok=True)

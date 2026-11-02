@@ -49,6 +49,27 @@ def ffmpeg_exe():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def ensure_ffmpeg_on_path():
+    """Az audio-separator (és a pydub) a PATH-on keresi az "ffmpeg" parancsot, és nélküle leáll ("FFmpeg is not
+    installed"). Ha a gépen nincs ffmpeg, az imageio-ffmpeg csomagét ffmpeg(.exe) néven a .tools\\ffmpeg mappába
+    másoljuk, és azt tesszük a PATH elejére. Az audio_separator importálása ELŐTT kell hívni."""
+    if shutil.which("ffmpeg"):
+        return
+    import imageio_ffmpeg
+
+    src = imageio_ffmpeg.get_ffmpeg_exe()
+    folder = os.path.join(ROOT, ".tools", "ffmpeg")
+    dst = os.path.join(folder, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if not (os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(src)):
+        os.makedirs(folder, exist_ok=True)
+        tmp = dst + ".tmp"
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, dst)
+        if os.name != "nt":
+            os.chmod(dst, 0o755)
+    os.environ["PATH"] = folder + os.pathsep + os.environ.get("PATH", "")
+
+
 def run_ffmpeg(args, what="ffmpeg"):
     cmd = [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", *args]
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",

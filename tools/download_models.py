@@ -144,6 +144,9 @@ def main():
 
     import logging
 
+    from dub.util import ensure_ffmpeg_on_path
+
+    ensure_ffmpeg_on_path()               # nélküle az audio-separator leáll, ha a gépen nincs ffmpeg
     from audio_separator.separator import Separator
 
     from dub.separate import MODEL_DIR, SEP_MODEL, drop_broken_model
