@@ -76,6 +76,21 @@ Felügyelet nélkül: `rkdub-telepito.exe /auto [/dir=D:\rkdub] [/noollama] [/no
 
 A projektmappában az **`install.bat`** ugyanezt csinálja grafikus ablak nélkül. Az új telepítő a `tools\build_installer.ps1`-gyel készíthető el (a `dist` mappába).
 
+### Linux
+
+Kell hozzá: NVIDIA-illesztő (az `nvidia-smi` működjön; a CUDA-t és a cuDNN-t a telepítő hozza), `curl`, és ajánlott a rendszer `ffmpeg`-je. NVIDIA-kártya nélkül a telepítő [processzoros módban](#processzoros-mód-nvidia-kártya-nélkül) telepít. A Python is a projektmappába kerül, rendszergazdai jog csak az Ollama telepítéséhez kell.
+
+```bash
+./install.sh            # [--no-ollama] [--no-models] [--no-shortcut] [--ollama-model gemma3:12b] [--yes] [--cpu]
+./start.sh              # vagy az alkalmazásmenüben: rkdub
+./start.sh --cli video.mp4 --speakers 2
+```
+
+- Ha nincs Ollama a gépen, a telepítő megkérdezi, hogy feltegye-e a hivatalos telepítőjével (`ollama.com/install.sh`, sudo-t kér, systemd-szolgáltatás lesz belőle). A fordítómodellt a videómemória alapján választja, mint Windowson.
+- A felület Chrome/Chromium/Edge/Brave alkalmazásablakban nyílik, ha van ilyen böngésző, különben az alapértelmezettben. A **Tallózás** a `zenity` vagy `kdialog` ablakát használja, ha telepítve van.
+- 8 GB-os kártyán (RTX 4060-on kipróbálva) is működik: ha kevés a szabad videómemória, a hangellenőrző Whisper int8-ban, végső esetben a processzoron fut. Egy 52 perces sorozatrész 1 óra 22 perc alatt készült el gemma3:4b-vel; a 4b fordítása viszont gyenge, ilyen kártyán jobb a DeepL.
+- Eltávolítás: `./uninstall.sh`.
+
 ### Eltávolítás
 
 Windows Beállítások → Alkalmazások → **rkdub** → Eltávolítás (vagy az `eltavolitas.bat`). Rákérdez, hogy a kész videókat elmentse-e, és hogy a letöltött modelleket is törölje-e. Az Ollama megmarad, mert más program is használhatja; külön távolítható el.
@@ -175,7 +190,7 @@ Egy végig beszédes 15 perces videó ezen a gépen kb. 3–4 óra, egy laptopon
 
 **Integrált videokártya (iGPU):** a hangmodell és a hangleválasztó Windowson nem tudja használni, ezek a processzoron futnak. A fordító AI (Ollama) a Vulkan-motorjával elvileg igen, de alapból kihagyja az integrált kártyát; az `OLLAMA_IGPU_ENABLE=1` környezeti változóval és az Ollama újraindításával bekapcsolható (nincs kipróbálva).
 
-NVIDIA-kártyás gépen is kipróbálható: `start.bat --cpu` (a telepítőnél `/cpu`).
+NVIDIA-kártyás gépen is kipróbálható: `start.bat --cpu` (a telepítőnél `/cpu`; Linuxon `./start.sh --cpu`, `./install.sh --cpu`).
 
 ## Korlátok
 

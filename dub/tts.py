@@ -221,8 +221,42 @@ class HungarianVoice:
         if qc:
             from faster_whisper import WhisperModel
 
-            dev = "cuda" if self.device != "cpu" else "cpu"
-            self.asr = WhisperModel(QC_MODEL, device=dev, compute_type=ct2_compute_type(dev))
+            from .transcribe import add_nvidia_dll_dirs
+
+            add_nvidia_dll_dirs()          # ha a felismerés egy korábbi futásban készült, itt töltődik be először
+            self.asr = self._load_qc_asr(WhisperModel)
+
+    def _load_qc_asr(self, WhisperModel):
+        """Az ellenőrző Whisper betöltése a szabad videómemóriához illő módon. Kis kártyán (pl. 8 GB, amiből az
+        asztal és más programok is foglalnak) a float16 large-v3 (~3 GB) az OmniVoice mellé nem fér el, és a hang
+        készítéséhez is kell még hely: ilyenkor int8-as, végső esetben CPU-s változat (lassabb, de működik)."""
+        # az OmniVoice a súlyain (~1,9 GB) felül hangkészítés közben még ~0,6 GB-ot használ (30 mp-es
+        # referenciahang kódolása): ennyinek, némi tartalékkal, az ellenőrző modell mellett is szabadnak kell maradnia.
+        # A sorok hangjának ellenőrzője (ECAPA, a pipeline-ban ez után töltődik be) további ~0,3 GB.
+        # (Mérve, RTX 4060: large-v3 float16 ~3,2 GB, int8_float16 ~1,8 GB a CUDA-környezettel együtt.)
+        headroom = 1.3
+        choices = [("cpu", "int8")]
+        full = None
+        if self.device != "cpu":
+            full = ct2_compute_type("cuda")      # GTX 10xx-en nem float16 (lásd ct2_compute_type)
+            small = "int8_float16" if full == "float16" else "int8"
+            free = self.torch.cuda.mem_get_info()[0] / 2**30
+            if free >= 3.2 + headroom:
+                choices = [("cuda", full), ("cuda", small), ("cpu", "int8")]
+            elif free >= 1.8 + headroom:
+                choices = [("cuda", small), ("cpu", "int8")]
+        for i, (dev, ct) in enumerate(choices):
+            try:
+                asr = WhisperModel(QC_MODEL, device=dev, compute_type=ct)
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower() or i == len(choices) - 1:
+                    raise
+                free_gpu()
+                continue
+            if self.device != "cpu" and (dev, ct) != ("cuda", full):
+                self.log(f"Kevés a szabad videómemória: a hangellenőrzés {'CPU-n' if dev == 'cpu' else ct + ' módban'} "
+                         "fut (lassabb, a hang minősége nem változik)")
+            return asr
 
     def close(self):
         self.model = self.asr = None
@@ -233,7 +267,10 @@ class HungarianVoice:
         """Hangminta (a referencia hang + a szövege), kulcs szerint gyorsítótárazva."""
         p = self.prompts.get(key)
         if p is None:
-            p = self.model.create_voice_clone_prompt(ref_audio=ref_wav, ref_text=ref_text)
+            # no_grad nélkül a referenciahang kódolója (DAC) a gradiensekhez minden köztes eredményt megtart:
+            # ~0,24 GB/mp (egy 15 mp-es mintánál 3,5 GB), így ~0,35 GB. A generálás eleve no_grad alatt fut.
+            with self.torch.no_grad():
+                p = self.model.create_voice_clone_prompt(ref_audio=ref_wav, ref_text=ref_text)
             self.prompts[key] = p
         return p
 
