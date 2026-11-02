@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """rkdub - helyi magyar szinkron. Indítás: grafikus felület (alapértelmezés), vagy
-parancssorból: rkdub.py --cli video.mp4 [--speakers 2] [--deepl] [--model qwen3.8:27b]"""
+parancssorból: rkdub.py --cli video.mp4 [--speakers 2] [--deepl] [--model qwen3.8:27b] [--source fr] [--target hu]"""
 
 import argparse
 import os
@@ -29,7 +29,10 @@ def main():
     ap.add_argument("--deepl", action="store_true", help="fordítás DeepL-lel a helyi AI helyett")
     ap.add_argument("--model", default="", help="Ollama-modell a fordításhoz")
     ap.add_argument("--ref", choices=["hu", "line", "speaker"], default="hu",
-                    help="hangminta: hu = magyarosított (akcentus nélkül), line = soronként, speaker = beszélőnként")
+                    help="hangminta: hu = célnyelvi kiejtéssel (akcentus nélkül), line = soronként, speaker = beszélőnként")
+    ap.add_argument("--source", default="", help="forrásnyelv kódja, pl. en, fr (alapból automatikus felismerés)")
+    ap.add_argument("--target", default="hu", help="célnyelv kódja: hu, en, de, fr, es, it, pt, pl, nl, cs, sk, ro, "
+                                                   "sv, tr, ru, uk (alapból hu)")
     ap.add_argument("--port", type=int, default=7870)
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--classic", action="store_true", help="a régi (Gradio-s) felület")
@@ -38,8 +41,12 @@ def main():
         from dub.pipeline import DubJob
         from dub.worker import JobProcess
 
+        from dub.translate import TARGETS
+
+        if a.target not in TARGETS:
+            ap.error(f"ismeretlen célnyelv: {a.target} (lehet: {', '.join(TARGETS)})")
         opts = {"num_speakers": a.speakers, "translator": "deepl" if a.deepl else "ollama",
-                "ollama_model": a.model, "ref_mode": a.ref}
+                "ollama_model": a.model, "ref_mode": a.ref, "source_lang": a.source, "target_lang": a.target}
         proc = JobProcess(os.path.abspath(a.cli), opts, DubJob(a.cli, opts).dir)
         code = 0
         while not proc.finished:

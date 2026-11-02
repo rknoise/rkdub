@@ -42,6 +42,16 @@ TARGETS = {
     "uk": ("Ukrainian", "ukrán", "ukr", "UK"),
 }
 NON_LATIN = {"ru", "uk"}
+ISO3 = dict({k: v[2] for k, v in TARGETS.items()}, ja="jpn", ko="kor", zh="chi")   # a videó hangsávjaihoz
+
+
+def lang_name(code, default="English"):
+    """A nyelv angol neve a fordító AI-nak; a forrásnyelv bármi lehet, amit a Whisper felismer."""
+    if code in LANG_NAMES:
+        return LANG_NAMES[code]
+    if code in TARGETS:
+        return TARGETS[code][0]
+    return code or default
 
 
 def out_key(target):
@@ -155,7 +165,7 @@ HU_STYLE = (
 def _system_prompt(src_lang, formality, notes, target="hu"):
     if target != "hu":
         return _generic_prompt(src_lang, formality, notes, target)
-    src = LANG_NAMES.get(src_lang, src_lang or "English")
+    src = lang_name(src_lang)
     s = (f"You are an experienced Hungarian dubbing translator (szinkronfordító). You translate {src} video "
          "dialogue into natural, idiomatic, spoken Hungarian that a Hungarian voice actor will perform as a "
          "lip-free dub.\n"
@@ -187,7 +197,7 @@ def _system_prompt(src_lang, formality, notes, target="hu"):
 
 def _generic_prompt(src_lang, formality, notes, target):
     """Nem magyar célnyelv: ugyanazok a szinkronfordítói szabályok, a magyar stílusjegyzet nélkül."""
-    src = LANG_NAMES.get(src_lang, TARGETS.get(src_lang, (src_lang or "English",))[0])
+    src = lang_name(src_lang)
     tgt = TARGETS[target][0]
     s = (f"You are an experienced dubbing translator. You translate {src} video dialogue into natural, idiomatic, "
          f"spoken {tgt} that a {tgt} voice actor will perform as a lip-free dub.\n"
@@ -345,7 +355,7 @@ def hunglish_problems(line):
 def review_ollama(lines, model, src_lang="en", formality="auto", notes="", batch=40, log=print, progress=None):
     """Második kör: a kész magyar szöveg átnézése az eredetivel együtt (félrefordítás, tükörfordítás,
     furcsa mondat), és csak a hibás sorok javítása."""
-    src = LANG_NAMES.get(src_lang, src_lang or "English")
+    src = lang_name(src_lang)
     system = (f"You are a senior Hungarian dubbing editor (szinkronrendező). You get {src} dialogue lines with "
               "a draft Hungarian dubbing translation. Check every line carefully:\n"
               "1. Does the Hungarian say exactly what the original means in this context? Watch for idioms "
@@ -467,10 +477,13 @@ _EN_PATTERNS = re.compile(r"[wxqWXQ]|ck|th|sh|ea|ee|oo|ou|ph|(?<![gGlLnNtT])y", 
 _WORD = re.compile(r"[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű][\w]*(?:-[A-Za-zÁÉÍÓÖŐÚÜŰáéíóöőúüű]+)?")
 
 
-def find_terms(text):
+def find_terms(text, source=""):
     """A sorban lévő nevek, rövidítések, idegen szavak (ezeket kell magyarosan kimondani).
     A magyar szavakhoz nem nyúlunk: csak a mondat belsejében nagybetűs, a csupa nagybetűs és az angolos
-    betűkapcsolatú (pl. ck, th, w, x) nagybetűs szavak számítanak."""
+    betűkapcsolatú (pl. ck, th, w, x) nagybetűs szavak számítanak, és (ha megvan az eredeti mondat) azok, amelyeket
+    a fordítás változatlanul átvett belőle: pl. francia név a mondat elején (Julien), kisbetűs idegen szó
+    (croissant, flat white). Ha egy ilyen szó magyarul is ugyanígy hangzik, a kiejtési lépés változatlanul hagyja."""
+    src = sorted({w.lower() for w in _WORD.findall(source) if len(w) >= 4}, key=len, reverse=True)
     terms = []
     for m in _WORD.finditer(text):
         base = re.sub(r"\d.*$", "", m.group(0).split("-")[0])        # Z13 -> Z (a számot a program mondja ki)
@@ -481,6 +494,10 @@ def find_terms(text):
                 or (base[0].isupper() and not sentence_start)                 # név a mondat belsejében
                 or (base[0].isupper() and _EN_PATTERNS.search(base))):        # Jack, Xbox a mondat elején
             terms.append(base)
+        elif len(base) >= 4 and src:
+            hit = next((s for s in src if base.lower().startswith(s)), None)   # Julien, Julienre, croissant-t
+            if hit:
+                terms.append(base[:len(hit)])
     return terms
 
 
@@ -506,7 +523,7 @@ def pronounce_ollama(lines, model, log=print, progress=None):
     todo = [ln for ln in lines if ln.get("hu") and not ln.get("say_edited")]
     found = {}
     for ln in todo:
-        for t in find_terms(ln["hu"]):
+        for t in find_terms(ln["hu"], ln.get("en", "")):
             found.setdefault(t, ln["hu"])
     if not found:
         return {}

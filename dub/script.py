@@ -5,14 +5,14 @@
 import os
 import re
 
-from .translate import max_chars
+from .translate import TARGETS, lang_name, max_chars
 from .util import OUT_DIR, fmt_time
 
 HEADER = """# rkdub – magyar szinkronszöveg: {name}
 # (Magyarul: a HU sorokat javítsd, a többit hagyd békén. A kész fájlt az rkdub Importálás gombjával töltheted vissza.)
 #
 # INSTRUCTIONS FOR THE REVIEWER (human or AI assistant):
-# This is the script of a Hungarian dub of an {lang} video. Each block below is one line of dialogue.
+# This is the script of a Hungarian dub of a video in {lang}. Each block below is one line of dialogue.
 #   EN:  the original line (from speech recognition, may contain recognition errors; do not edit it).
 #   HU:  the Hungarian dub line, also used as the subtitle. Improve it so it sounds like a professional
 #        Hungarian dub: natural, idiomatic spoken Hungarian (no word-for-word translation, no anglicisms
@@ -26,7 +26,22 @@ HEADER = """# rkdub – magyar szinkronszöveg: {name}
 # renumber the blocks. Return the complete file as plain text.
 """
 
-_LANG = {"en": "English", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian", "ja": "Japanese"}
+# Nem magyar célnyelvnél: ugyanaz a fájlformátum (a "HU:" címke maradt), a magyar stílusszabályok nélkül
+HEADER_OTHER = """# rkdub – szinkronszöveg ({tname}): {name}
+# (Magyarul: a HU sorokat javítsd, ezekben a {tname} szöveg van; a többit hagyd békén. A kész fájlt az rkdub
+# Importálás gombjával töltheted vissza.)
+#
+# INSTRUCTIONS FOR THE REVIEWER (human or AI assistant):
+# This is the script of a {tgt} dub of a video in {lang}. Each block below is one line of dialogue.
+#   EN:  the original line (from speech recognition, may contain recognition errors; do not edit it).
+#   HU:  the {tgt} dub line (the label is historical), also used as the subtitle. Improve it so it sounds
+#        like a professional {tgt} dub: natural, idiomatic spoken {tgt} (no word-for-word translation),
+#        perfect grammar, the same meaning and tone. Keep names, brands and product names. The block header
+#        shows the time slot and a character budget ("max"): stay close to it so the line can be spoken in time.
+#   SAY: leave it empty.
+# Keep every "### <number>" line and the "EN:", "HU:", "SAY:" labels. Do not merge, split, reorder or
+# renumber the blocks. Return the complete file as plain text.
+"""
 
 
 def export_path(job):
@@ -36,12 +51,16 @@ def export_path(job):
     return os.path.join(OUT_DIR, safe_stem(job.src) + "_forditas.txt")
 
 
-def export_script(job, lang="en"):
+def export_script(job, lang="en", target="hu"):
     """-> (fájl útvonala, szöveg)"""
     from .pipeline import safe_stem
 
     lines = job.lines()
-    out = [HEADER.format(name=safe_stem(job.src), lang=_LANG.get(lang, lang or "English"))]
+    if target == "hu":
+        out = [HEADER.format(name=safe_stem(job.src), lang=lang_name(lang))]
+    else:
+        out = [HEADER_OTHER.format(name=safe_stem(job.src), lang=lang_name(lang), tgt=TARGETS[target][0],
+                                   tname=TARGETS[target][1])]
     for ln in lines:
         dur = ln["end"] - ln["start"]
         out.append(f"### {ln['id'] + 1} | {fmt_time(ln['start'])} – {fmt_time(ln['end'])} | {dur:.1f} s | "

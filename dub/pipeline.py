@@ -649,9 +649,10 @@ class DubJob:
         sub_lines = [ln for i, ln in enumerate(lines) if times[i]]
         sub_times = [t for t in times if t]
         os.makedirs(OUT_DIR, exist_ok=True)
-        from .translate import TARGETS
+        from .translate import ISO3, TARGETS
 
         target = self.target()
+        src_lang = (read_json(self.p("words.json")) or {}).get("lang", "")
         _en, name, iso3, _dl = TARGETS[target]
         stem = safe_stem(self.src) + ("_magyar" if target == "hu" else f"_{target}")
         srt = os.path.join(OUT_DIR, stem + ".srt")
@@ -662,7 +663,7 @@ class DubJob:
             media.mux_video(self.src, self.p("dub_mix.wav"), out_path,
                             keep_original=self.opt["keep_original_track"],
                             srt_path=srt if self.opt["subtitles"] else None, lang=iso3,
-                            lang_name=name.capitalize())
+                            lang_name=name.capitalize(), orig_lang=ISO3.get(src_lang))
             hu_audio = os.path.join(OUT_DIR, stem + "_hangsav.m4a")      # a magyar hangsáv külön is
             media.encode_audio(self.p("dub_mix.wav"), hu_audio)
         else:

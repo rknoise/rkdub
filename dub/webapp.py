@@ -28,7 +28,7 @@ UPLOAD_DIR = os.path.join(ROOT, "feltoltes")
 TRANSLATORS = [("ollama", "Helyi AI (Ollama)"), ("deepl", "DeepL")]
 FORMALITY = [("auto", "Automatikus"), ("informal", "Tegező"), ("formal", "Magázó")]
 REF_MODES = [("hu", "Eredeti hang, célnyelvi kiejtéssel (ajánlott)"), ("line", "Eredeti hang, soronkénti hangsúllyal"),
-             ("speaker", "Eredeti hang, beszélőnként (angol mintából)")]
+             ("speaker", "Eredeti hang, beszélőnként (az eredeti nyelvű mintából)")]
 ASR_MODELS = [("large-v3-turbo", "large-v3-turbo (gyors, ajánlott)"), ("large-v3", "large-v3 (legpontosabb)")]
 OPTION_KEYS = ["translator", "ollama_model", "deepl_key", "formality", "num_speakers", "speaker_genders",
                "ref_mode", "notes",
@@ -427,7 +427,7 @@ def api_export():
     if not S.job or not os.path.exists(S.job.p("lines.json")):
         raise HTTPException(400, "Előbb futtass le egy szinkront (vagy legalább a fordítást).")
     lang = (read_json(S.job.p("words.json")) or {}).get("lang", "en")
-    path, text = script.export_script(S.job, lang)
+    path, text = script.export_script(S.job, lang, S.job.target())
     S.exported = text
     return {"path": path, "text": text}
 

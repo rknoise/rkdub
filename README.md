@@ -142,7 +142,7 @@ Mért adatok (40 mp-es, kétszereplős próbavideó, gemma3:27b):
 ## Parancssor
 
 ```
-.venv\Scripts\python.exe rkdub.py --cli video.mp4 [--speakers 2] [--deepl] [--model gemma3:27b] [--ref speaker]
+.venv\Scripts\python.exe rkdub.py --cli video.mp4 [--speakers 2] [--deepl] [--model gemma3:27b] [--ref speaker] [--source fr] [--target hu]
 ```
 
 ## Próba

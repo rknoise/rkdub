@@ -18,8 +18,8 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("rkdub telepítő")]
 [assembly: AssemblyProduct("rkdub - helyi magyar szinkron")]
-[assembly: AssemblyVersion("1.2.3.0")]
-[assembly: AssemblyFileVersion("1.2.3.0")]
+[assembly: AssemblyVersion("1.2.4.0")]
+[assembly: AssemblyFileVersion("1.2.4.0")]
 
 static class Program
 {
