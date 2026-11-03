@@ -2,9 +2,9 @@
 
 # rkdubby – helyi magyar szinkron
 
-> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU (or, more slowly, on the CPU), in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer.
+> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU (or, more slowly, on the CPU), in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer. Requirements: Windows 10/11 64-bit, NVIDIA GTX 10xx or newer with 8 GB VRAM (RTX with 12 GB+ recommended), 16 GB RAM; without a supported NVIDIA card (including GTX 9xx and older) it runs on the CPU, much more slowly.
 
-Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizálja **az eredeti beszélők hangján**, a háttérzenét és a zajokat megtartva. Minden a saját gépeden fut, a videókártyádon (RTX 3090-en tesztelve). Internet csak a telepítéshez kell.
+Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizálja **az eredeti beszélők hangján**, a háttérzenét és a zajokat megtartva. Minden a saját gépeden fut: NVIDIA-videokártyán gyorsan, nélküle a processzoron, lassabban (lásd a [rendszerkövetelményeket](#rendszerkövetelmények)). Internet csak a telepítéshez kell.
 
 <p align="center"><img src="docs/kepernyokep.png" alt="Az rkdub felülete" width="900"></p>
 
@@ -21,6 +21,22 @@ Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizál
 6. **Időzítés**: a mondat a helyére kerül. Ha hosszabb, kicsit gyorsabban mondja. Ha nagyon nem fér el, a helyi AI rövidebb fordítást ad.
 7. **Minőségellenőrzés**: minden kész magyar mondatot a gép visszahallgat. Ha elakadt, ismételt vagy kihagyott, újra elkészíti.
 8. **Keverés és mentés**: a videókép változatlan marad. Mellé kerül a magyar hangsáv és az eredeti hang második sávként, a magyar felirat pedig külön .srt fájlba (kérésre a videóba is). Hangfájlnál M4A vagy MP3 lesz az eredmény.
+
+## Rendszerkövetelmények
+
+| | Minimum | Ajánlott |
+|---|---|---|
+| Rendszer | Windows 10 vagy 11, 64 bites | Windows 11 |
+| Videokártya | NVIDIA GeForce GTX 10xx vagy újabb, **8 GB** videómemóriával (pl. GTX 1070/1080, RTX 2060 Super, RTX 3060 Ti) | NVIDIA RTX **12 GB**-tól (pl. RTX 3060 12 GB, RTX 4070); a legjobb fordításhoz **24 GB** (RTX 3090/4090) |
+| Processzor | 4 mag | 8 mag |
+| Memória (RAM) | 16 GB | 32 GB |
+| Szabad hely | kb. 23 GB | 40 GB, SSD-n |
+| Internet | csak a telepítéshez (kb. 18 GB letöltés) | |
+| Egy végig beszédes 15 perces videó | GTX 10xx-en még nincs mérve | kb. 25–30 perc (RTX 3090) |
+
+- **A videómemória mérete** a fordítómodellt határozza meg: 24 GB-on gemma3:27b (a legtermészetesebb magyar), 12–16 GB-on 12b, ennél kevesebben 4b. A szinkron többi része 8 GB-ba belefér: mérve a legtöbbet a hangkészítés foglal a visszahallgatással együtt, kb. 6–8 GB-ot. 6 GB-os kártyán nincs kipróbálva.
+- **GTX 10xx (Pascal):** az 1.3.1-től támogatott, a beszédfelismerés ott int8-cal fut. A GTX 9xx és a régebbi kártyákat (pl. **GTX 970**) a mostani PyTorch már nem támogatja, ezeken a telepítő processzoros módot választ.
+- **NVIDIA-kártya nélkül** (AMD vagy Intel videokártyával, integrált videokártyával, vagy GTX 9xx-szel és régebbivel) a program [processzoros módban](#processzoros-mód-nvidia-kártya-nélkül) fut: minimum 4 magos processzor, 16 GB RAM és kb. 19 GB szabad hely kell hozzá, ajánlott a 8 mag és a 32 GB RAM. Ez jóval lassabb: egy végig beszédes 15 perces videó egy erős, 8 magos asztali processzoron kb. 3–4 óra, laptopon akár ennek a kétszerese. AMD Ryzen 7000-től gyorsabb, mert ott a hangmodell bfloat16-tal számol.
 
 ## Telepítés
 
