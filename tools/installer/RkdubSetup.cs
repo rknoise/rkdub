@@ -13,13 +13,14 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 using System.Threading;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("rkdub telepítő")]
 [assembly: AssemblyProduct("rkdub - helyi magyar szinkron")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyFileVersion("1.3.1.0")]
 
 static class Program
 {
@@ -91,7 +92,8 @@ class SetupForm : Form
     StreamWriter logFile;
     string gpuName = "";
     int gpuMiB = 0, fakeVram = 0;
-    bool forceCpu;
+    double gpuCc, fakeCc;                  // a kártya generációja (compute capability), pl. 6.1 = GTX 10xx
+    bool forceCpu, gpuOld;
 
     // folyamatjelző: minden mező a felület szálán változik
     readonly List<Part> parts = new List<Part>();
@@ -104,7 +106,7 @@ class SetupForm : Form
 
     public SetupForm(string[] args)
     {
-        string dir = @"C:\rkdub";
+        string dir = ExistingInstall() ?? @"C:\rkdub";
         bool noOllama = false, noModels = false, noShortcut = false;
         string shot = null;
         foreach (string a in args)
@@ -114,6 +116,7 @@ class SetupForm : Form
             else if (l.StartsWith("/shot=")) shot = a.Substring(6).Trim('"');   // fejlesztéshez: az ablak képe PNG-be
             else if (l.StartsWith("/vram=")) int.TryParse(a.Substring(6), out fakeVram);   // fejlesztéshez: más méretű videókártya
             else if (l == "/cpu") forceCpu = true;   // fejlesztéshez: processzoros mód NVIDIA-kártya mellett is
+            else if (l.StartsWith("/cc=")) double.TryParse(a.Substring(4), NumberStyles.Float, CultureInfo.InvariantCulture, out fakeCc);   // fejlesztéshez: más generációjú kártya
             else if (l.StartsWith("/dir=")) dir = a.Substring(5).Trim('"');
             else if (l == "/noollama") noOllama = true;
             else if (l == "/nomodels") noModels = true;
@@ -303,25 +306,62 @@ class SetupForm : Form
     // ---------------------------------------------------------------- a gép adatai
     void DetectGpu()
     {
+        // a kártya generációja (compute capability) is kell: a PyTorch a GTX 10xx-től (6.1) támogatja a kártyákat.
+        // A régi meghajtó nem ismeri ezt a mezőt, akkor nélküle kérdezünk.
+        string line = Smi("--query-gpu=name,memory.total,compute_cap --format=csv,noheader,nounits");
+        if (line.Split(',').Length < 3) line = Smi("--query-gpu=name,memory.total --format=csv,noheader,nounits");
+        string[] parts = line.Split(',');
+        if (parts.Length >= 2)
+        {
+            gpuName = parts[0].Trim();
+            int.TryParse(parts[1].Trim(), out gpuMiB);
+            if (parts.Length >= 3) double.TryParse(parts[2].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out gpuCc);
+        }
+        if (fakeVram > 0) gpuMiB = fakeVram;
+        if (fakeCc > 0) gpuCc = fakeCc;
+        gpuOld = gpuName.Length > 0 && gpuCc > 0 && gpuCc < 6.1;
+        if (gpuOld) gpuMiB = 0;                    // processzoros mód: a fordítómodell is a kicsi
+        if (forceCpu) { gpuName = ""; gpuMiB = 0; gpuOld = false; }
+    }
+
+    static string Smi(string args)
+    {
         try
         {
-            ProcessStartInfo si = new ProcessStartInfo("nvidia-smi", "--query-gpu=name,memory.total --format=csv,noheader,nounits");
+            ProcessStartInfo si = new ProcessStartInfo("nvidia-smi", args);
             si.UseShellExecute = false; si.RedirectStandardOutput = true; si.CreateNoWindow = true;
             using (Process p = Process.Start(si))
             {
                 string line = p.StandardOutput.ReadLine() ?? "";
                 p.WaitForExit(5000);
-                string[] parts = line.Split(',');
-                if (parts.Length >= 2)
-                {
-                    gpuName = parts[0].Trim();
-                    int.TryParse(parts[1].Trim(), out gpuMiB);
-                }
+                return line;
+            }
+        }
+        catch { return ""; }
+    }
+
+    // van-e használható NVIDIA-kártya (a GTX 10xx-nél régebbit a PyTorch már nem támogatja)
+    bool UseGpu { get { return gpuName.Length > 0 && !gpuOld; } }
+
+    // a meglévő telepítés helye (a telepítő írja az eltávolító bejegyzésébe): frissítésnél ezt ajánljuk fel, így
+    // ugyanoda kerül, és a már letöltött részeket (PyTorch, csomagok, modellek) nem tölti le újra
+    static string ExistingInstall()
+    {
+        try
+        {
+            using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\rkdub"))
+            {
+                string loc = k == null ? null : k.GetValue("InstallLocation") as string;
+                if (!string.IsNullOrEmpty(loc) && IsInstalled(loc)) return loc;
             }
         }
         catch { }
-        if (fakeVram > 0) gpuMiB = fakeVram;
-        if (forceCpu) { gpuName = ""; gpuMiB = 0; }
+        return null;
+    }
+
+    static bool IsInstalled(string dir)
+    {
+        return File.Exists(Path.Combine(dir, "rkdub.py")) && File.Exists(Path.Combine(dir, ".venv", "Scripts", "python.exe"));
     }
 
     string AutoModel()
@@ -342,7 +382,7 @@ class SetupForm : Form
     double DownloadGb()
     {
         // uv, Python, PyTorch, csomagok; NVIDIA nélkül a PyTorch processzoros változata 0,6 GB a 3,5 GB helyett
-        double gb = gpuName.Length > 0 ? 3.85 : 1.01;
+        double gb = UseGpu ? 3.85 : 1.01;
         if (chkOllama.Checked) gb += (OllamaInstalled() ? 0 : 1.68) + AutoModelGb();
         if (chkModels.Checked) gb += 9.11;
         return gb;
@@ -359,7 +399,13 @@ class SetupForm : Form
 
     void UpdateInfo()
     {
-        if (gpuName.Length > 0)
+        if (gpuOld)
+        {
+            gpuLabel.Text = "Videókártya: " + gpuName.Replace("NVIDIA ", "") +
+                " – ehhez túl régi (GTX 10xx-től megy): processzoros módban telepítek, lassabb.";
+            gpuLabel.ForeColor = Amber;
+        }
+        else if (gpuName.Length > 0)
         {
             gpuLabel.Text = "Videókártya: " + gpuName + " · " + (gpuMiB / 1024.0).ToString("0") + " GB videómemória" +
                 (chkOllama.Checked ? "   →   fordítómodell: " + AutoModel() : "");
@@ -374,20 +420,23 @@ class SetupForm : Form
         bool nonAscii = false;
         foreach (char ch in dir) if (ch > 127) nonAscii = true;
         pathWarn.Text = nonAscii ? "Figyelem: ékezetes betű van az útvonalban – ez hibát okozhat. Javaslat: C:\\rkdub" : "";
+        bool update = false;
+        try { update = IsInstalled(Path.GetFullPath(dir)); } catch { }
         try
         {
             string root = Path.GetPathRoot(Path.GetFullPath(dir));
             DriveInfo d = new DriveInfo(root);
             // mért értékek: .venv 8 GB, modellek 9 GB, Ollama 3 GB; a csomagok telepítése közben a uv-gyorsítótár is 8 GB
             // (processzoros módban a .venv és a gyorsítótár kisebb, mert nincs benne a CUDA)
-            long need = (gpuName.Length > 0 ? 8L : 4L) << 30;
+            long need = (UseGpu ? 8L : 4L) << 30;
             if (chkModels.Checked) need += 9L << 30;
             if (chkOllama.Checked)
             {
                 need += (long)(AutoModelGb() * 1e9);
                 if (!OllamaInstalled()) need += 3L << 30;
             }
-            need = Math.Max(need, (gpuName.Length > 0 ? 16L : 8L) << 30);
+            need = Math.Max(need, (UseGpu ? 16L : 8L) << 30);
+            if (update) need = 1L << 30;            // frissítés: a meglévő részek a helyükön maradnak
             string txt = "Szabad hely a " + root.TrimEnd('\\') + " meghajtón: " + Gb(d.AvailableFreeSpace) + " (kell kb. " + Gb(need) + ")";
             if (chkOllama.Checked)
                 txt += "  ·  benne a fordítómodell: " + AutoModel();
@@ -395,8 +444,12 @@ class SetupForm : Form
             diskLabel.ForeColor = d.AvailableFreeSpace < need ? Red : Txt;
         }
         catch { diskLabel.Text = ""; }
-        hintLabel.Text = "Kattints a Telepítés gombra. A letöltés kb. " + DownloadGb().ToString("0.0", Hu) +
-            " GB, ami már megvan a gépen, azt nem tölti le újra.";
+        if (update)
+            hintLabel.Text = "Itt már van rkdub: a Frissítés csak a program fájljait cseréli, a letöltött részeket nem tölti le újra.";
+        else
+            hintLabel.Text = "Kattints a Telepítés gombra. A letöltés kb. " + DownloadGb().ToString("0.0", Hu) +
+                " GB, ami már megvan a gépen, azt nem tölti le újra.";
+        if (installBtn != null && !running && !finished) installBtn.Text = update ? "Frissítés" : "Telepítés";
     }
 
     // ---------------------------------------------------------------- telepítés
@@ -434,7 +487,7 @@ class SetupForm : Form
         if (!chkOllama.Checked) args += " -NoOllama";
         if (!chkModels.Checked) args += " -NoModels";
         if (!chkShortcut.Checked) args += " -NoShortcut";
-        if (forceCpu) args += " -Cpu";
+        if (forceCpu || gpuOld) args += " -Cpu";
         Thread t = new Thread(delegate() { Work(dir, args); });
         t.IsBackground = true;
         t.Start();

@@ -177,6 +177,15 @@ function Gpu-MemMiB {
     } catch { return 0 }
 }
 
+function Gpu-Cc {
+    # a kártya generációja (compute capability, pl. 6.1 = GTX 10xx); ha a régi meghajtó nem ismeri a mezőt: 0
+    try {
+        $smi = (Get-Command nvidia-smi -ErrorAction Stop).Source
+        $v = & $smi --query-gpu=compute_cap --format=csv,noheader | Select-Object -First 1
+        return [double]::Parse($v.Trim(), [Globalization.CultureInfo]::InvariantCulture)
+    } catch { return 0 }
+}
+
 function Pull-Model($name) {
     # Az Ollama saját letöltője a HTTP API-n át: tiszta százalékos napló (az "ollama pull" konzolos animációja helyett)
     $req = [Net.HttpWebRequest]::Create('http://127.0.0.1:11434/api/pull')
@@ -223,11 +232,17 @@ try {
         Write-Host 'Figyelem: ékezet van a mappa útvonalában. Ha hibát látsz, tedd a mappát pl. ide: C:\rkdub' -ForegroundColor Yellow
     }
     $gpuMiB = Gpu-MemMiB
+    $gpuCc = Gpu-Cc
+    if ($gpuMiB -gt 0 -and $gpuCc -gt 0 -and $gpuCc -lt 6.1) {
+        # a GTX 9xx és a régebbi kártyákat a PyTorch már nem támogatja (a GTX 10xx a 6.1)
+        Write-Host ("A videokártya túl régi a gyorsításhoz (compute capability {0}; a GTX 10xx-től megy)." -f $gpuCc) -ForegroundColor Yellow
+        $gpuMiB = 0
+    }
     if ($Cpu) { $gpuMiB = 0 }
     if ($gpuMiB -gt 0) {
         Write-Host ("Videókártya: NVIDIA, {0:N0} GB videómemória" -f ($gpuMiB / 1024))
     } else {
-        Write-Host 'Nem találtam NVIDIA-videokártyát: processzoros módban telepítek. A szinkron így is elkészül, csak lassabban (egy 15 perces videó kb. 3-8 óra).' -ForegroundColor Yellow
+        Write-Host 'Processzoros módban telepítek (nincs használható NVIDIA-videokártya). A szinkron így is elkészül, csak lassabban (egy 15 perces videó kb. 3-8 óra).' -ForegroundColor Yellow
         # a PyTorch processzoros változata: 0,6 GB a CUDA-s 3,5 GB helyett
         $TorchTag = 'cpu'
         $TorchIndex = 'https://download.pytorch.org/whl/cpu'

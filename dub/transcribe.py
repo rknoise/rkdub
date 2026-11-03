@@ -4,7 +4,7 @@
 import os
 import sys
 
-from .util import free_gpu
+from .util import ct2_compute_type, free_gpu
 
 SENT_END = (".", "!", "?", "…")
 SOFT_END = (",", ";", ":", "—", "–")
@@ -35,7 +35,7 @@ def transcribe(vocals_16k, model_name="large-v3-turbo", language=None, log=print
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Beszédfelismerő betöltése: {model_name} ({'GPU' if device == 'cuda' else 'CPU'})")
-    model = WhisperModel(model_name, device=device, compute_type="float16" if device == "cuda" else "int8")
+    model = WhisperModel(model_name, device=device, compute_type=ct2_compute_type(device))
     total = len(vocals_16k) / 16000
     segments, info = model.transcribe(
         vocals_16k,

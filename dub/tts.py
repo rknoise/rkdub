@@ -8,7 +8,7 @@ import unicodedata
 
 import numpy as np
 
-from .util import free_gpu
+from .util import ct2_compute_type, free_gpu
 
 TTS_SR = 24000
 MAX_SPEEDUP = 1.35             # ennél jobban nem gyorsítjuk a beszédet (utána: rövidebb fordítás)
@@ -216,8 +216,8 @@ class HungarianVoice:
         if qc:
             from faster_whisper import WhisperModel
 
-            self.asr = WhisperModel(QC_MODEL, device="cuda" if self.device != "cpu" else "cpu",
-                                    compute_type="float16" if self.device != "cpu" else "int8")
+            dev = "cuda" if self.device != "cpu" else "cpu"
+            self.asr = WhisperModel(QC_MODEL, device=dev, compute_type=ct2_compute_type(dev))
 
     def close(self):
         self.model = self.asr = None

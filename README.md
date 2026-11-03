@@ -50,6 +50,8 @@ Ha az Ollama már fent van a gépen, 1,7 GB-tal kevesebb; ha DeepL fordít helyi
 
 Ha a letöltés megszakad, futtasd újra a telepítőt ugyanabba a mappába. A kész részeket nem tölti le újra, a PyTorch, az Ollama, a fordítómodell és a BS-Roformer ott folytatódik, ahol abbamaradt, a többi modellnél csak a félbemaradt fájl indul elölről.
 
+**Frissítés:** futtasd az új telepítőt. Magától a meglévő telepítés mappáját ajánlja fel (a gomb ilyenkor *Frissítés*), és csak a program fájljait cseréli: a PyTorch, a csomagok, a modellek és az Ollama megmaradnak, nem töltődnek le újra.
+
 A telepítő nincs digitálisan aláírva, ezért a Windows először figyelmeztethet („A Windows megvédte a számítógépet”): **További információ → Futtatás mindenképp**.
 
 Felügyelet nélkül: `rkdub-telepito.exe /auto [/dir=D:\rkdub] [/noollama] [/nomodels] [/noshortcut]`. A `/cpu` kapcsolóval NVIDIA-kártyás gépen is processzoros módban telepít (kipróbáláshoz).
@@ -132,6 +134,8 @@ Mért adatok (40 mp-es, kétszereplős próbavideó, gemma3:27b):
 - Telepítés után internet nélkül is működik (a modellek helyben vannak; ha a `.models\letoltve.txt` fájlt törlöd, újra ellenőrzi őket).
 
 ## Processzoros mód (NVIDIA-kártya nélkül)
+
+A GTX 10xx kártyákon (Pascal) a videokártyás mód megy, de ez a generáció nem tud float16-ot, ezért ott a beszédfelismerés int8-cal fut. A régebbi kártyákat (GTX 9xx és korábbi) a PyTorch már nem támogatja, ezeken a telepítő processzoros módot választ.
 
 Ha a gépben nincs NVIDIA-videokártya, a telepítő ezt magától felismeri, és processzoros módban telepít: a PyTorch processzoros változatát (0,6 GB a 3,5 GB helyett) és a kis gemma3:4b fordítómodellt. A program ugyanaz, a fejlécben „Processzoros mód” látszik, és könnyített beállításokkal fut:
 

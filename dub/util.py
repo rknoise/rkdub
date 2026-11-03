@@ -113,20 +113,38 @@ _cpu_mode = None
 
 
 def cpu_mode():
-    """Nincs használható NVIDIA-kártya (vagy RKDUB_CPU=1): a szinkron processzoron, könnyített beállításokkal
-    fut. Az nvidia-smi alapján dönt, a torch betöltése nélkül (a felületnek is gyorsan kell)."""
+    """Nincs használható NVIDIA-kártya (nincs, vagy a GTX 10xx-nél régebbi, amit a PyTorch már nem támogat; vagy
+    RKDUB_CPU=1): a szinkron processzoron, könnyített beállításokkal fut. Az nvidia-smi alapján dönt, a torch
+    betöltése nélkül (a felületnek is gyorsan kell)."""
     global _cpu_mode
     if _cpu_mode is None:
         _cpu_mode = True
         exe = shutil.which("nvidia-smi")
         if exe and os.environ.get("RKDUB_CPU") != "1":
+            run = lambda *a: subprocess.run([exe, *a], capture_output=True, text=True, timeout=10,  # noqa: E731
+                                            creationflags=NO_WINDOW).stdout.strip()
             try:
-                out = subprocess.run([exe, "-L"], capture_output=True, text=True, timeout=10,
-                                     creationflags=NO_WINDOW).stdout
-                _cpu_mode = "GPU" not in out
+                try:
+                    _cpu_mode = float(run("--query-gpu=compute_cap", "--format=csv,noheader").splitlines()[0]) < 6.1
+                except (ValueError, IndexError):      # a régi meghajtó nem ismeri a mezőt
+                    _cpu_mode = "GPU" not in run("-L")
             except Exception:
                 pass
     return _cpu_mode
+
+
+def ct2_compute_type(device):
+    """A Whisper (CTranslate2) számítási típusa. GPU-n float16, ha a kártya hatékonyan tudja (RTX 20-astól);
+    a GTX 10xx-en a CTranslate2 a float16-ot hibával elutasítja, ott int8 (azt a kártya gyorsan számolja)."""
+    if device != "cuda":
+        return "int8"
+    try:
+        import ctranslate2
+
+        types = ctranslate2.get_supported_compute_types("cuda")
+    except Exception:
+        return "float16"
+    return next((t for t in ("float16", "int8_float32", "int8") if t in types), "float32")
 
 
 def free_gpu():
