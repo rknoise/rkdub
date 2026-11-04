@@ -1,4 +1,4 @@
 # -*- coding: utf-8 -*-
 """rkdub: helyi magyar szinkron angol (vagy más nyelvű) videókhoz és hangfájlokhoz."""
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"

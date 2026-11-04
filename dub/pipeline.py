@@ -66,6 +66,14 @@ def _sig(*parts):
     return hashlib.sha1("|".join(str(p) for p in parts).encode("utf-8")).hexdigest()[:12]
 
 
+def _purity(ln):
+    """Mennyire jellemző a sor a szereplőjére (a beszélő-hozzárendelés méri; kézzel átrendelt vagy régi
+    sornál semleges)."""
+    if ln.get("speaker_edited") or "spk_sim" not in ln:
+        return 0.5
+    return float(ln["spk_sim"])
+
+
 def safe_stem(path):
     stem = os.path.splitext(os.path.basename(path))[0]
     keep = "".join(c if c.isalnum() or c in " -_.()" else "_" for c in stem).strip(" .")
@@ -74,6 +82,31 @@ def safe_stem(path):
 
 class Cancelled(Exception):
     pass
+
+
+class _VoiceCheck:
+    """A kész sor hangjának hasonlósága a szereplő hangmintájához (ECAPA); hangmintánként gyorsítótárazva.
+    Ha nagyon eltér (a hangmodell néha idegen hangon szólal meg, főleg rövid, felkiáltó mondatnál), a
+    hangmodell újrapróbálja."""
+
+    def __init__(self):
+        from .speakers import SpeakerEmbedder
+
+        self.emb = SpeakerEmbedder()
+        self.targets = {}
+
+    def fn(self, key, ref_audio):
+        import librosa
+
+        if key not in self.targets:
+            audio, rate = ref_audio
+            y = np.asarray(audio.numpy() if hasattr(audio, "numpy") else audio, dtype=np.float32).reshape(-1)
+            self.targets[key] = self.emb.embed(librosa.resample(y, orig_sr=rate, target_sr=16000))
+        t = self.targets[key]
+        return lambda y: float(self.emb.embed(librosa.resample(y, orig_sr=24000, target_sr=16000)) @ t)
+
+    def close(self):
+        self.emb.close()
 
 
 class DubJob:
@@ -95,6 +128,12 @@ class DubJob:
         self.state.setdefault("src", self.src)
         self.state.setdefault("sigs", {})
         self.state["src"] = self.src
+        if "algo" not in self.state:
+            # 2: írásjeles beszédfelismerés + új beszélő-hozzárendelés (1.4.0). Egy régi munkát csak akkor
+            # dolgoz fel újra, ha nincs benne kézi javítás (az újrafuttatás elvinné a javított szöveget)
+            edited = bool(self.state["sigs"]) and any(
+                ln.get("edited") or ln.get("say_edited") or ln.get("speaker_edited") for ln in self.lines())
+            self.state["algo"] = 1 if edited else 2
         self._stage_i = 0
         if self.opt.get("mode") == "srt":
             self.stages = SRT_HU_STAGES if self.opt.get("srt_hu") else SRT_STAGES
@@ -198,8 +237,10 @@ class DubJob:
     # 3. beszédfelismerés + sorokra bontás
     def transcribe(self):
         asr_model = self.opt.get("asr_model") or "large-v3-turbo"
-        sig = _sig(self.state["sigs"].get("separate"), self.opt["source_lang"],
-                   "turbo-v1" if asr_model == "large-v3-turbo" else asr_model)
+        tag = "turbo-v1" if asr_model == "large-v3-turbo" else asr_model
+        if self.state.get("algo", 1) >= 2:
+            tag += "-p2"                       # írásjeles súgó, a kihagyott részek pótlása
+        sig = _sig(self.state["sigs"].get("separate"), self.opt["source_lang"], tag)
         if self._fresh("transcribe", sig, "words.json"):
             return
         from .transcribe import transcribe
@@ -291,7 +332,8 @@ class DubJob:
     # 4. beszélők
     def speakers(self):
         sig = _sig(self.state["sigs"].get("transcribe"), self.opt["num_speakers"],
-                   ",".join(sorted(self.opt.get("speaker_genders") or [])), "v2-ecapa-pitch")
+                   ",".join(sorted(self.opt.get("speaker_genders") or [])),
+                   "v3-centroid" if self.state.get("algo", 1) >= 2 else "v2-ecapa-pitch")
         if self._fresh("speakers", sig, "lines.json"):
             return
         from .speakers import assign_speakers
@@ -399,11 +441,14 @@ class DubJob:
             seg = mono[int(a * sr): int(b * sr)]
             return torch.from_numpy(np.ascontiguousarray(seg)), sr
 
-        # beszélőnkénti hangminta: a legtisztább, legkerekebb sorokból, 8-11 mp
+        # beszélőnkénti hangminta: a legtisztább, legkerekebb és a szereplőre legjellemzőbb sorokból (spk_sim:
+        # mennyire hasonlít a sor a szereplő átlagos hangjára), 8-11 mp. Régen a leghosszabb sorok nyertek, és
+        # ha egy hosszú sorban más is beszélt, a szereplő végig az ő hangját kapta.
         spk_ref = {}
         for spk in sorted({ln.get("speaker", 0) for ln in lines}):
             cands = sorted([ln for ln in lines if ln.get("speaker", 0) == spk],
-                           key=lambda ln: -(min(ln["end"] - ln["start"], 9.0) * ln.get("conf", 0.8)))
+                           key=lambda ln: -(min(ln["end"] - ln["start"], 9.0) * ln.get("conf", 0.8)
+                                            * max(0.05, _purity(ln)) ** 2))
             picked, total = [], 0.0
             for ln in cands:
                 d = ln["end"] - ln["start"]
@@ -483,13 +528,19 @@ class DubJob:
         voice = HungarianVoice(log=self.log, qc=self.opt["qc"], tempo=self.opt.get("tempo", 1.0), lang=target)
         speakable = lambda t: speak_for(t, target)      # noqa: E731
         too_long = []
+        check = None
         try:
             if hu_mode:
                 self._hu_anchors(voice, lines, refs, eng_refs, vocals, sr)
+            if voice.asr is not None:          # a visszahallgatással együtt (processzoros módban nincs)
+                try:
+                    check = _VoiceCheck()
+                except Exception as e:
+                    self.log(f"  a hangellenőrzés nem indult el: {short_err(e)}")
             t0 = time.time()
             for n, i in enumerate(todo):
                 self.check_cancel()
-                too_long += self._synth_one(voice, lines, i, refs, total, speakable, key_of)
+                too_long += self._synth_one(voice, lines, i, refs, total, speakable, key_of, check)
                 self.progress(0.85 * (n + 1) / len(todo), f"Magyar hang: {n + 1}/{len(todo)} sor")
                 if (n + 1) % 10 == 0:
                     self.save_lines(lines)
@@ -505,17 +556,25 @@ class DubJob:
                 voice = HungarianVoice(log=self.log, qc=self.opt["qc"], tempo=self.opt.get("tempo", 1.0), lang=target)
                 for n, i in enumerate(too_long):
                     self.check_cancel()
-                    self._synth_one(voice, lines, i, refs, total, speakable, key_of)
+                    self._synth_one(voice, lines, i, refs, total, speakable, key_of, check)
                     self.progress(0.85 + 0.15 * (n + 1) / len(too_long), "Rövidített sorok")
                 self.save_lines(lines)
         finally:
             self.save_lines(lines)          # megszakításkor is megmarad, ami elkészült
             if voice:
                 voice.close()
+            if check:
+                check.close()
         bad = [ln["id"] + 1 for ln in lines if ln.get("qc_cer", 0) > QC_FLAG]
         if bad:
             self.log(f"Figyelem: {len(bad)} sor a visszahallgatás szerint eltér a szövegtől "
                      f"(érdemes meghallgatni): {bad[:20]}")
+        from .tts import VOICE_MIN
+
+        odd = [ln["id"] + 1 for ln in lines if ln.get("voice_sim") is not None and ln["voice_sim"] < VOICE_MIN]
+        if odd:
+            self.log(f"Figyelem: {len(odd)} sor hangja újrapróbálás után is eltér a szereplőétől "
+                     f"(érdemes meghallgatni): {odd[:20]}")
 
     def _hu_anchors(self, voice, lines, refs, eng_refs, vocals, sr):
         """Beszélőnként egy "magyarosított" hangminta (a beszélő hangján elmondott magyar mondat), a
@@ -545,8 +604,8 @@ class DubJob:
                     import librosa
 
                     mono = vocals.mean(axis=1) if vocals.ndim > 1 else vocals
-                    seg = np.concatenate([mono[int(x["start"] * sr): int(x["end"] * sr)]
-                                          for x in lines if x.get("speaker", 0) == spk][:12])
+                    mine = sorted([x for x in lines if x.get("speaker", 0) == spk], key=lambda x: -_purity(x))
+                    seg = np.concatenate([mono[int(x["start"] * sr): int(x["end"] * sr)] for x in mine[:12]])
                     target = emb.embed(librosa.resample(seg, orig_sr=sr, target_sr=16000))
                     sim_fn = lambda y, t=target: float(emb.embed(librosa.resample(y, orig_sr=24000, target_sr=16000)) @ t)  # noqa: E731
                 y, c, ph, sim = voice.hu_anchor(voice.prompt(ekey, eaudio, etext), sim_fn)
@@ -563,7 +622,7 @@ class DubJob:
             key, _, text = refs[ln["id"]]
             refs[ln["id"]] = (key, made[key], text)
 
-    def _synth_one(self, voice, lines, i, refs, total, speakable, key_of):
+    def _synth_one(self, voice, lines, i, refs, total, speakable, key_of, check=None):
         import soundfile as sf
 
         ln = lines[i]
@@ -577,7 +636,8 @@ class DubJob:
         avail = self._avail(lines, i, total)
         try:
             prompt = voice.prompt(key, ref_audio, ref_text)
-            r = voice.synth_fit(text, prompt, avail, seed0=ln["id"] * 7, refs=[ln["hu"], say, text])
+            vfn = check.fn(key, ref_audio) if check else None
+            r = voice.synth_fit(text, prompt, avail, seed0=ln["id"] * 7, refs=[ln["hu"], say, text], voice=vfn)
         except Exception as e:
             self.log(f"  {i + 1}. sor: hiba a hang készítésekor: {short_err(e)}")
             return []
@@ -585,7 +645,8 @@ class DubJob:
         sf.write(self.p(f), r["y"], 24000)
         ln.update({"tts_file": f, "tts_key": key_of(ln, i), "tts_dur": round(r["dur"], 2),
                    "tts_natural": round(r["natural"], 2), "avail": round(avail, 2),
-                   "qc_cer": round(r["cer"], 3), "qc_heard": r["hyp"], "fits": r["fits"]})
+                   "qc_cer": round(r["cer"], 3), "qc_heard": r["hyp"], "fits": r["fits"],
+                   "voice_sim": None if r.get("vsim") is None else round(r["vsim"], 3)})
         return [] if r["fits"] or ln.get("edited") else [i]
 
     def _shorten(self, lines, idx, total):

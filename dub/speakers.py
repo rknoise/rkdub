@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Beszélők szétválasztása soronként: hangszín (ECAPA hangnyomat) ÉS hangmagasság együtt, majd csoportosítás.
+"""Beszélők szétválasztása soronként: hangszín (ECAPA hangnyomat) és egy kis súlyú hangmagasság-tag alapján.
 Ebből lesz a beszélőnkénti hangminta, amivel minden szereplő végig ugyanazon a hangon szólal meg.
 
-Miért a kettő együtt: rövid sorokon (főleg gépi, pl. AI-generált videóknál) a hangnyomat egyedül sokszor
-összekeveri a szereplőket, a hangmagasság viszont (pl. idősebb férfi ~110 Hz, fiatal ~140 Hz) jól elválasztja
-őket; a hangmagasság egyedül viszont egy kiabáló mondatnál tévedne. Ha így is rossz a beosztás, a felületen
-soronként átírható a beszélő."""
+Két lépésben: előbb csak a megbízható (hosszabb) sorok csoportosulnak, aztán minden sor a hozzá leghasonlóbb
+szereplőhöz kerül, és ez ismétlődik, amíg a szereplők átlagos hangnyomata már nem változik. Az egyes sorok
+hangnyomata zajos (rövid, érzelmes, kiabáló mondat), a szereplők átlaga viszont stabil, ezért a döntés az
+átlagokhoz mér. Automatikus módban a program előbb bőven szétválogat, aztán összevonja, ami az átlag szerint
+ugyanaz az ember; megadott szereplőszámnál is összevonja a nyilvánvalóan azonos embert (ha túl sokat adtak meg).
+
+Mérve (2026-11-04): 4 szereplős mérőpárbeszéd, 4 szereplő beállítva: 68% -> 99% helyes hang; ugyanez 5-6-ra
+állítva 89% -> 96-99%; a régi, erős hangmagasság-súly a két hasonló magasságú férfit összevonta, a kiabáló
+nőt pedig kettévágta. Ha így is rossz a beosztás, a felületen soronként átírható a beszélő."""
 
 import numpy as np
 
@@ -13,12 +18,15 @@ from .util import ROOT, free_gpu
 
 ECAPA_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
 SV_MODEL = "microsoft/wavlm-base-plus-sv"      # tartalék, ha a speechbrain nincs telepítve
-# A hangmagasság-különbség (log-arány) súlya és felső korlátja a távolságban. Automatikus módban kicsi, mert
-# ugyanaz a beszélő is beszél hol mélyebben, hol magasabban (ezt ne vegye új szereplőnek); ha a beszélők számát
-# megadják, nagy, mert akkor a feladat csak a szétosztás, és ott a hangmagasság a legmegbízhatóbb jel.
-PITCH_AUTO = (0.5, 0.15)
-PITCH_FIXED = (1.5, 0.45)
-AUTO_THRESHOLD = 0.5       # automatikus módban e fölötti átlagos távolság már külön beszélő
+PITCH_W, PITCH_CAP = 0.2, 0.12   # hangmagasság-különbség (log-arány) súlya és felső korlátja: csak finomít
+RELIABLE_SEC = 1.5               # az első csoportosításhoz ennél hosszabb sorok (a rövidek hangnyomata zajos)
+OVER_THRESHOLD = 0.4             # automatikus mód: előbb bőven szétválogat (átlagos távolság e fölött külön) ...
+MERGE_SIM = 0.5                  # ... aztán összevonja, aminek az átlagos hangnyomata ennyire hasonlít
+SAME_PERSON_SIM = 0.6            # megadott szereplőszámnál ennyire hasonló két csoport biztosan ugyanaz az ember
+TINY_SHARE, TINY_SEC, TINY_SIM = 0.02, 8.0, 0.3   # automatikus mód: a beszéd <2%-a és <8 mp csoport beolvad
+SHORT_ONLY_SEC = 1.0             # (ha elég hasonló), a csupa ennél rövidebb sorból álló csoport mindenképp
+REFINE_ITERS = 10
+FEMALE_HZ = 165.0                # e fölötti medián alaphang: női hang (férfi ~85-155 Hz, női ~165-255 Hz)
 
 
 class SpeakerEmbedder:
@@ -83,26 +91,136 @@ def median_pitch(y16):
     return float(np.median(vals)) if len(vals) >= 5 else None
 
 
-FEMALE_HZ = 165.0          # e fölötti medián alaphang: női hang (férfi ~85-155 Hz, női ~165-255 Hz)
+# --- csoportosítás -------------------------------------------------------------------------------------------
+
+def _pitch_term(pa, pb):
+    if not pa or not pb:
+        return 0.0
+    return min(PITCH_CAP, PITCH_W * abs(np.log(pa / pb)))
 
 
-def _cluster(D, k):
+def _centroids(X, pitch, dur, labels):
+    """Csoportonként a sorok hangnyomatának (hosszal súlyozott) átlaga és a medián hangmagasság."""
+    ks = sorted(set(labels.tolist()))
+    C, cp = [], []
+    for k in ks:
+        idx = np.where(labels == k)[0]
+        c = (X[idx] * np.minimum(dur[idx], 6.0)[:, None]).sum(0)
+        C.append(c / (np.linalg.norm(c) + 1e-9))
+        ps = [pitch[i] for i in idx if pitch[i]]
+        cp.append(float(np.median(ps)) if ps else None)
+    return ks, np.stack(C), cp
+
+
+def _nearest(X, pitch, C, cp, ks):
+    D = 0.5 * (1.0 - X @ C.T)
+    for i in range(len(X)):
+        for j in range(len(ks)):
+            D[i, j] += _pitch_term(pitch[i], cp[j])
+    return np.array(ks)[D.argmin(1)]
+
+
+def _refine(X, pitch, dur, labels):
+    """Minden sor a legközelebbi szereplő-átlaghoz, amíg a beosztás már nem változik."""
+    for _ in range(REFINE_ITERS):
+        ks, C, cp = _centroids(X, pitch, dur, labels)
+        new = _nearest(X, pitch, C, cp, ks)
+        if (new == labels).all():
+            break
+        labels = new
+    return labels
+
+
+def _merge_similar(X, pitch, dur, labels, thr):
+    """A két leghasonlóbb csoport összevonása, amíg az átlagos hangnyomatuk hasonlósága legalább thr."""
+    while True:
+        ks, C, _cp = _centroids(X, pitch, dur, labels)
+        if len(ks) < 2:
+            return labels
+        S = C @ C.T
+        np.fill_diagonal(S, -1.0)
+        i, j = np.unravel_index(int(np.argmax(S)), S.shape)
+        if S[i, j] < thr:
+            return labels
+        keep, drop = (ks[i], ks[j]) if dur[labels == ks[i]].sum() >= dur[labels == ks[j]].sum() else (ks[j], ks[i])
+        labels = labels.copy()
+        labels[labels == drop] = keep
+        labels = _refine(X, pitch, dur, labels)
+
+
+def _merge_tiny(X, pitch, dur, labels):
+    """Automatikus mód: a pár kiabálásból, nevetésből álló mini-csoport ne kapjon külön hangot, ha hasonlít
+    egy nagyra (vagy csupa nagyon rövid sorból áll, amiknek a hangnyomata úgysem megbízható)."""
+    total = dur.sum()
+    kept = set()
+    while True:
+        ks, C, _cp = _centroids(X, pitch, dur, labels)
+        talk = {c: dur[labels == c].sum() for c in ks}
+        small = {c for c in ks if talk[c] < TINY_SHARE * total and talk[c] < TINY_SEC}
+        cand = [c for c in ks if c in small and c not in kept]
+        big = [c for c in ks if c not in small]
+        if not cand or not big:
+            return labels
+        c = min(cand, key=lambda c: talk[c])
+        sims = {b: float(C[ks.index(c)] @ C[ks.index(b)]) for b in big}
+        b = max(sims, key=sims.get)
+        if sims[b] < TINY_SIM and dur[labels == c].max() >= SHORT_ONLY_SEC:
+            kept.add(c)                       # tényleg más hang (pl. egy rövid bejátszás)
+        else:
+            labels = labels.copy()
+            labels[labels == c] = b
+
+
+def _group(X, pitch, dur, k):
+    """Egy sorhalmaz csoportosítása: k szereplőre (k > 1), vagy automatikusan (k == 0)."""
+    n = len(X)
+    if n == 1 or k == 1:
+        return np.zeros(n, dtype=int)
     from sklearn.cluster import AgglomerativeClustering
 
-    if len(D) == 1:
-        return np.zeros(1, int)
+    D = 0.5 * (1.0 - X @ X.T)
+    for i in range(n):
+        for j in range(n):
+            D[i, j] += _pitch_term(pitch[i], pitch[j])
+    np.fill_diagonal(D, 0.0)
+    D = np.clip(D, 0.0, None)
+    rel = np.where(dur >= RELIABLE_SEC)[0]
+    if len(rel) < max(4, 2 * (k or 2)):
+        rel = np.argsort(-dur)[: max(4, min(n, 2 * (k or 2)))]
+    rel = np.sort(rel)
+    if len(rel) < 2:
+        return np.zeros(n, dtype=int)
+    sub = D[np.ix_(rel, rel)]
     if k:
-        return AgglomerativeClustering(n_clusters=min(k, len(D)), metric="precomputed",
-                                       linkage="average").fit_predict(D)
-    return AgglomerativeClustering(n_clusters=None, metric="precomputed", linkage="average",
-                                   distance_threshold=AUTO_THRESHOLD).fit_predict(D)
+        lab_rel = AgglomerativeClustering(n_clusters=min(k, len(rel)), metric="precomputed",
+                                          linkage="average").fit_predict(sub)
+    else:
+        lab_rel = AgglomerativeClustering(n_clusters=None, metric="precomputed", linkage="average",
+                                          distance_threshold=OVER_THRESHOLD).fit_predict(sub)
+    ks, C, cp = _centroids(X[rel], [pitch[i] for i in rel], dur[rel], lab_rel)
+    labels = _nearest(X, pitch, C, cp, ks)
+    labels[rel] = lab_rel
+    labels = _refine(X, pitch, dur, labels)
+    if k:
+        return _merge_similar(X, pitch, dur, labels, SAME_PERSON_SIM)
+    labels = _merge_similar(X, pitch, dur, labels, MERGE_SIM)
+    labels = _merge_tiny(X, pitch, dur, labels)
+    return _refine(X, pitch, dur, labels)
+
+
+def _sexes(X, pitch, dur, labels):
+    """Csoportonként a nem a csoport medián hangmagasságából (nem soronként: egy kiabáló férfi mondata
+    180 Hz is lehet)."""
+    ks, _C, cp = _centroids(X, pitch, dur, labels)
+    return {c: ("f" if p >= FEMALE_HZ else "m") if p else None for c, p in zip(ks, cp)}
 
 
 def assign_speakers(lines, vocals_16k, num_speakers=0, log=print, genders=None):
-    """Minden sorhoz "speaker" (0, 1, ...). num_speakers=0: automatikus.
+    """Minden sorhoz "speaker" (0, 1, ...) és "spk_sim" (mennyire hasonlít a szereplő átlagos hangjára; a
+    hangminta a legjellemzőbb sorokból készül). num_speakers=0: automatikus.
     genders: a szereplők neme, ha ismert (pl. ["f", "f", "m", "m", "m"] = 2 nő, 3 férfi; a többi szereplőé
-    ismeretlen). Ilyenkor a sorok előbb hangmagasság szerint nőkre és férfiakra oszlanak, és csak a csoporton
-    belül bomlanak szereplőkre; a sorszámok a megadott nemekhez igazodnak."""
+    ismeretlen). Ha minden szereplő neme meg van adva, a nők és a férfiak külön csoportosulnak; a sorszámok a
+    megadott nemekhez igazodnak (B1-B2 nők, B3-B5 férfiak)."""
     if not lines:
         return lines
     genders = [g for g in (genders or []) if g in ("f", "m")][: num_speakers or None]
@@ -117,58 +235,45 @@ def assign_speakers(lines, vocals_16k, num_speakers=0, log=print, genders=None):
         seg = vocals_16k[int(ln["start"] * 16000): int(ln["end"] * 16000)]
         vecs.append(emb.embed(seg))
         pitch.append(median_pitch(seg))
-    kind = emb.kind
     emb.close()
     X = np.stack(vecs)
+    dur = np.array([ln["end"] - ln["start"] for ln in lines])
     n = len(lines)
-    # távolság: hangszín (1 - koszinusz-hasonlóság, a WavLM szűkebb skálája felnagyítva) + hangmagasság
-    timbre = 1.0 - X @ X.T
-    if kind == "wavlm":
-        timbre = timbre * 3.0
-    weight, cap = PITCH_FIXED if num_speakers and num_speakers > 1 else PITCH_AUTO
-    pd = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            if pitch[i] and pitch[j]:
-                pd[i, j] = min(cap, weight * abs(np.log(pitch[i] / pitch[j])))
-    D = np.clip(0.5 * timbre + pd, 0.0, None)
-    np.fill_diagonal(D, 0.0)
+    k = num_speakers if num_speakers and num_speakers > 1 else 0
 
     nf, nm = genders.count("f"), genders.count("m")
-    rest = (num_speakers - nf - nm) if num_speakers else 0
-    sex = ["f" if p and p >= FEMALE_HZ else "m" if p else None for p in pitch]
-    if nf and nm and rest == 0:
-        # minden szereplő neme ismert: nők és férfiak külön csoportosítva, a saját létszámukra
-        labels = np.full(n, -1)
-        nxt = 0
-        for g, k in (("f", nf), ("m", nm)):
-            idx = [i for i in range(n) if sex[i] == g]
-            if not idx:
-                continue
-            sub = _cluster(D[np.ix_(idx, idx)], k)
-            for i, l in zip(idx, sub):
-                labels[i] = nxt + int(l)
-            nxt += int(sub.max()) + 1
-        for i in range(n):                    # hangmagasság nélküli sor: a hozzá leghasonlóbb csoportba
-            if labels[i] < 0:
-                cands = {int(l): D[i, labels == l].mean() for l in set(labels.tolist()) if l >= 0}
-                labels[i] = min(cands, key=cands.get) if cands else 0
-    else:
-        if (nf or nm) and len({x for x in sex if x}) > 1:
-            # ismert nemek mellett a női és férfi sorok ne kerüljenek egy szereplőhöz
-            for i in range(n):
-                for j in range(n):
-                    if sex[i] and sex[j] and sex[i] != sex[j] and (nf and nm or rest):
-                        D[i, j] += 1.0
-        labels = _cluster(D, num_speakers if num_speakers and num_speakers > 1 else 0)
+    labels = None
+    if k and nf and nm and nf + nm == k:
+        # minden szereplő neme ismert: a sorok nemét a hangjuk csoportja adja (automatikus csoportosítással),
+        # aztán a nők és a férfiak külön csoportosulnak a saját létszámukra
+        auto = _group(X, pitch, dur, 0)
+        sex = _sexes(X, pitch, dur, auto)
+        line_sex = np.array([sex.get(int(a)) or "?" for a in auto])
+        if "?" in line_sex:                   # hangmagasság nélküli csoport: a hozzá leghasonlóbb nemű csoporthoz
+            ks, C, _cp = _centroids(X, pitch, dur, auto)
+            known = [c for c in ks if sex.get(c)]
+            for c in ks:
+                if not sex.get(c) and known:
+                    best = max(known, key=lambda b: float(C[ks.index(c)] @ C[ks.index(b)]))
+                    line_sex[auto == c] = sex[best]
+        if (line_sex == "f").any() and (line_sex == "m").any():
+            labels = np.full(n, -1)
+            nxt = 0
+            for g, kk in (("f", nf), ("m", nm)):
+                idx = np.where(line_sex == g)[0]
+                if not len(idx):
+                    continue
+                sub = _group(X[idx], [pitch[i] for i in idx], dur[idx], min(kk, len(idx)))
+                labels[idx] = nxt + sub
+                nxt += int(sub.max()) + 1
+            labels[labels < 0] = 0
+    if labels is None:
+        labels = _group(X, pitch, dur, k)
 
     # a csoportok sorszáma: a megadott nemek sorrendjében (pl. B1-B2 nő, B3-B5 férfi), azon belül a
     # többet beszélő előre; ismeretlen nemű helyek a végén
-    talk = {c: sum(ln["end"] - ln["start"] for ln, l in zip(lines, labels) if l == c) for c in set(labels.tolist())}
-    csex = {}
-    for c in talk:
-        ps = [p for p, l in zip(pitch, labels) if l == c and p]
-        csex[c] = ("f" if np.median(ps) >= FEMALE_HZ else "m") if ps else None
+    talk = {c: dur[labels == c].sum() for c in set(labels.tolist())}
+    csex = _sexes(X, pitch, dur, labels)
     slots = genders + ["?"] * max(0, (num_speakers or 0) - len(genders))
     free = list(range(len(slots)))
     order = {}
@@ -183,10 +288,11 @@ def assign_speakers(lines, vocals_16k, num_speakers=0, log=print, genders=None):
         else:
             free.remove(pick)
         order[c] = pick
-    # sorszám-hézagok nélkül (ha egy megadott szereplőnek nem jutott sor)
-    remap = {v: k for k, v in enumerate(sorted(order.values()))}
-    for ln, l in zip(lines, labels):
+    remap = {v: i for i, v in enumerate(sorted(order.values()))}     # sorszám-hézagok nélkül
+    ks, C, _cp = _centroids(X, pitch, dur, labels)
+    for i, (ln, l) in enumerate(zip(lines, labels)):
         ln["speaker"] = int(remap[order[int(l)]])
+        ln["spk_sim"] = round(float(X[i] @ C[ks.index(int(l))]), 3)
     info = []
     for c in sorted(order, key=lambda c: order[c]):
         ps = [p for p, l in zip(pitch, labels) if l == c and p]

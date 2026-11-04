@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, media, script
 from . import translate as tr
 from .pipeline import DEFAULT_OPTIONS, QC_FLAG, DubJob, safe_stem
+from .tts import VOICE_MIN
 from .util import NO_WINDOW, OUT_DIR, ROOT, WORK_DIR, cpu_mode, fmt_time, load_settings, read_json, save_settings
 from .worker import JobProcess
 
@@ -344,6 +345,8 @@ def api_lines():
         note = ""
         if ln.get("qc_cer", 0) > QC_FLAG:
             note = f"A visszahallgatás eltérést talált: „{ln.get('qc_heard', '')}”"
+        elif ln.get("voice_sim") is not None and ln["voice_sim"] < VOICE_MIN:
+            note = f"A hangja eltér a szereplőétől (hasonlóság {ln['voice_sim']:.2f}); érdemes meghallgatni"
         elif ln.get("fits") is False:
             note = f"Hosszú: {ln.get('tts_dur', 0):.1f} mp a {ln.get('avail', 0):.1f} mp helyett"
         rows.append({"no": ln["id"] + 1, "start": ln["start"], "time": fmt_time(ln["start"]),

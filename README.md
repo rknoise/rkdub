@@ -2,7 +2,7 @@
 
 # rkdubby – helyi magyar szinkron
 
-> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU (or, more slowly, on the CPU), in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps → speaker clustering (ECAPA voiceprint + pitch) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and regenerated if it doesn't say what it should → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer. Requirements: Windows 10/11 64-bit, NVIDIA GTX 10xx or newer with 8 GB VRAM (RTX with 12 GB+ recommended), 16 GB RAM; without a supported NVIDIA card (including GTX 9xx and older) it runs on the CPU, much more slowly.
+> **English summary:** rkdub dubs English (or other language) videos and audio files into Hungarian, locally on your NVIDIA GPU (or, more slowly, on the CPU), in the original speakers' voices — like ElevenLabs Dubbing, but offline. Pipeline: BS-Roformer speech/background separation → Whisper large-v3-turbo transcription with word timestamps (punctuation-hinted, with a second pass filling anything the hinted pass skipped) → two-stage speaker clustering (ECAPA voiceprints refined against per-speaker centroids, so a character keeps one voice) → translation by a local LLM (Ollama) or DeepL, with time budgets per line → OmniVoice zero-shot voice cloning in Hungarian, fitted to each line's time slot, every line checked by an ASR round-trip and a voiceprint check, and regenerated if it does not say what it should or drifts away from the character's voice → mix with the original background → MP4 with the Hungarian track, the original track and Hungarian subtitles. Local web UI with a line editor and a one-file Windows installer. Requirements: Windows 10/11 64-bit, NVIDIA GTX 10xx or newer with 8 GB VRAM (RTX with 12 GB+ recommended), 16 GB RAM; without a supported NVIDIA card (including GTX 9xx and older) it runs on the CPU, much more slowly.
 
 Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizálja **az eredeti beszélők hangján**, a háttérzenét és a zajokat megtartva. Minden a saját gépeden fut: NVIDIA-videokártyán gyorsan, nélküle a processzoron, lassabban (lásd a [rendszerkövetelményeket](#rendszerkövetelmények)). Internet csak a telepítéshez kell.
 
@@ -13,13 +13,13 @@ Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizál
 ## Mit csinál?
 
 1. **Beszéd és háttér szétválasztása** (BS-Roformer): a zene és a zajok megmaradnak, csak a beszéd cserélődik.
-2. **Beszédfelismerés** (Whisper large-v3-turbo) szóidőkkel, mondatokra bontva.
-3. **Beszélők azonosítása**: ki melyik mondatot mondja (több szereplőnél mindenki a saját hangján szólal meg).
+2. **Beszédfelismerés** (Whisper large-v3-turbo) szóidőkkel, írásjelekkel, mondatokra bontva. A Whisper néha hosszú szakaszokon írásjel nélkül ír; ilyenkor egy sorba több szereplő szövege kerülne. Ezért a program egy írásjeles „súgóval” futtatja, és ahol a súgós futás kihagy valamit, azt egy második futásból pótolja. Így minden sor egyetlen mondat, egyetlen beszélővel.
+3. **Beszélők azonosítása**: ki melyik mondatot mondja, a hangszín alapján. A program először a hosszabb, megbízható mondatokból állítja össze a szereplők hangképét, aztán minden mondatot a hozzá leghasonlóbb szereplőhöz rendel. Így egy szereplő akkor is végig ugyanazon a hangon szól, ha hol nyugodtan beszél, hol kiabál. A hangminta a szereplő legjellemzőbb mondataiból készül. (Mérés egy 4 szereplős párbeszéden: a sorok 99%-a kapta a helyes hangot, a korábbi változattal 68%.)
 4. **Fordítás** helyi AI-val (Ollama) vagy DeepL-lel, szinkronfordítói stílusban. A helyi AI tudja, mennyi ideje van egy mondatra, és ahhoz igazítja a fordítást. Utána még két kör jön: egy átnézés, és egy célzott javítás azokra a sorokra, amelyekben a program tükörfordítást talál („Ez egy…”, „-val való”, „számára”, „gaming”), vagy amelyek túl hosszúak.
    - **Kiejtés:** a feliratba a normál magyar szöveg kerül („FSR 4.1”, „Xbox”, „60 fps”). A hang viszont úgy mondja ki, ahogy egy magyar szinkronszínész: „ef-es-er négy pont egy”, „ikszboksz”, „hatvan ef-pé-es”. A számokat a ragokkal együtt a program írja ki („7000-es” → „hétezres”).
 5. **Magyar hang az eredeti hangján** (OmniVoice hangklónozás). Alapból **magyarosított hangmintával**: minden beszélő hangján először egy magyar mintamondat készül, és a sorok ebből szólalnak meg. Így nincs angolos akcentus; a tesztben a felismerő 99%-ban magyarnak hallotta, az angol mintával 89%-ban.
 6. **Időzítés**: a mondat a helyére kerül. Ha hosszabb, kicsit gyorsabban mondja. Ha nagyon nem fér el, a helyi AI rövidebb fordítást ad.
-7. **Minőségellenőrzés**: minden kész magyar mondatot a gép visszahallgat. Ha elakadt, ismételt vagy kihagyott, újra elkészíti.
+7. **Minőségellenőrzés**: minden kész magyar mondatot a gép visszahallgat. Ha elakadt, ismételt vagy kihagyott, újra elkészíti. Azt is megnézi, hogy a mondat a szereplő hangján szól-e. A hangmodell néha idegen hangon mond egy-egy rövid, felkiáltó mondatot, ilyenkor újrapróbálja.
 8. **Keverés és mentés**: a videókép változatlan marad. Mellé kerül a magyar hangsáv és az eredeti hang második sávként, a magyar felirat pedig külön .srt fájlba (kérésre a videóba is). Hangfájlnál M4A vagy MP3 lesz az eredmény.
 
 ## Rendszerkövetelmények
@@ -92,7 +92,7 @@ Ajánlott a **gemma3:27b** (a teszteken ez fordított a legtermészetesebben mag
    - `név_magyar.mp4`: a szinkronizált videó (1. hangsáv magyar, 2. az eredeti; kérésre beágyazott magyar felirattal),
    - `név_magyar_hangsav.m4a`: csak a magyar hangsáv,
    - `név_magyar.srt` / `név_eredeti.srt`: feliratok.
-4. **Szöveg ellenőrzése és finomhangolása:** a hangszóró gombbal soronként meghallgathatod az eredetit vagy az új magyart (a „Meghallgatási sáv” gombokkal választhatsz). A **Magyar** és a **Kiejtés** oszlop átírható, és a **B1/B2…** választóval azt is, melyik szereplő mondja a sort (ha a program rosszul osztotta be). A **Hang készítése** gomb után csak a módosított sorok készülnek el újra. A ⚠ jel azt jelenti, hogy a visszahallgatás eltérést talált, ezt érdemes meghallgatni.
+4. **Szöveg ellenőrzése és finomhangolása:** a hangszóró gombbal soronként meghallgathatod az eredetit vagy az új magyart (a „Meghallgatási sáv” gombokkal választhatsz). A **Magyar** és a **Kiejtés** oszlop átírható, és a **B1/B2…** választóval azt is, melyik szereplő mondja a sort (ha a program rosszul osztotta be). A **Hang készítése** gomb után csak a módosított sorok készülnek el újra. A ⚠ jel azt jelenti, hogy a visszahallgatás eltérést talált, vagy hogy a sor hangja újrapróbálás után is eltér a szereplőétől. Ezt érdemes meghallgatni.
 
 A régi (Gradio-s) felület is elérhető még: `start.bat --classic`.
 
@@ -120,7 +120,7 @@ Ha csak feliratot készítenél, a fordító AI nem kell: a telepítőben kapcso
 | Whisper-modell | large-v3-turbo (gyors) vagy large-v3 (pontosabb felismerés) |
 | Megszólítás | automatikus / tegező / magázó |
 | Beszédtempó | 0,85–1,15×; 1,00 = a beszélő természetes tempója |
-| Szereplők száma | csúszka 0–10-ig: **auto** = a program dönti el; ha tudod, állítsd be (pontosabb). Alatta a **Nő / Férfi** mezőkbe beírhatod, hányan vannak (pl. 2 nő, 3 férfi): ilyenkor a program hangmagasság szerint előbb nőkre és férfiakra bontja a sorokat, így két különböző nemű szereplő hangja nem keveredik. A számozás is ehhez igazodik (B1–B2 nők, B3–B5 férfiak). Amit nem adsz meg, annak a nemét a program dönti el. |
+| Szereplők száma | csúszka 0–10-ig: **auto** = a program dönti el; ha tudod, állítsd be (pontosabb). Ha több szereplőt adsz meg, mint ahányan valójában vannak, a nyilvánvalóan azonos embert a program akkor is egy hangnak veszi, így senki hangja nem esik szét. Alatta a **Nő / Férfi** mezőkbe beírhatod, hányan vannak (pl. 2 nő, 3 férfi): ilyenkor a program előbb nőkre és férfiakra bontja a szereplőket (a szereplő átlagos hangmagassága szerint, így egy kiabáló férfi mondata sem kerül a nőkhöz), így két különböző nemű szereplő hangja nem keveredik. A számozás is ehhez igazodik (B1–B2 nők, B3–B5 férfiak). Amit nem adsz meg, annak a nemét a program dönti el. |
 | Hangklónozás / célhang | **célnyelvi kiejtéssel** (ajánlott): akcentus nélkül; **soronként**: az eredeti angol mondat a minta, jobban követi a hangsúlyt, de angolosabb; **beszélőnként**: angol minta, egységes hang |
 | Megjegyzés a fordítónak | pl. a videó témája, nevek, kifejezések; a ✨ gombbal gyakori megjegyzések szúrhatók be (stílus, nevek, szakszavak) |
 | Háttérzene és zajok | megmaradjanak-e |
@@ -184,6 +184,8 @@ NVIDIA-kártyás gépen is kipróbálható: `start.bat --cpu` (a telepítőnél 
 - **Akcentus:** a magyarosított hangmintával alig hallható. A soronkénti módban (angol minta) a magyar beszéd néha angolos.
 - **Szájmozgás:** nincs szájszinkron, a mondatok időzítése igazodik az eredetihez (mint az ElevenLabsnél).
 - **Egymásba beszélés:** ha egyszerre többen beszélnek, a beszélők szétválasztása pontatlanabb.
+- **Sok hasonló hangú szereplő:** ha több szereplő van, mint amennyit megadsz (pl. egy jelenetben 9 ember, a csúszkán 4), a hasonló hangú mellékszereplők egy főszereplő hangját kapják. Ha két hasonló hangú fiatal nő is van, a hangszín alapján a program néha egynek veszi őket. Ilyenkor a sorok a **B1/B2…** választóval átírhatók.
+- **Korábbi munkák:** egy régebbi munkamappa (a `munkak` mappában) csak akkor készül el újra az új beszéd- és beszélőfelismeréssel, ha nincs benne kézi javítás. A kézzel javított munkát a program nem bontja meg.
 - **Hangminta jogai:** csak olyan videót szinkronizálj, amelynek a hangjához jogod van. Saját, nem kereskedelmi célra használd; az OmniVoice-modell licence CC-BY-NC.
 
 ## Parancssor

@@ -16,6 +16,11 @@ QC_MAX_CER = 0.2               # a visszahallgatott szöveg ennyiben térhet el 
 QC_MODEL = "large-v3"          # magyarul jóval pontosabb a turbónál (kevesebb téves riasztás)
 CPU_NUM_STEP = 16              # processzoron fele annyi lépés (32 helyett): a mérésen ugyanolyan érthető és hasonló
 FIT_SLACK = 0.35               # ennyivel (mp) nyúlhat túl egy sor a helyén
+# A kész sor hangja legalább ennyire hasonlítson a szereplő hangmintájára (ECAPA), különben új próbálkozás jön.
+# Mérve (2026-11-04, dráma): a sorok jellemzően 0,45-0,85; egy "Rohadt!" a férfi szereplő helyett idegen,
+# 360 Hz-es hangon szólt (0,16). A nagyon rövid kész hangnál (0,8 mp alatt) a mérés megbízhatatlan, ott nincs.
+VOICE_MIN = 0.35
+VOICE_TRIES = 2                # ennyi plusz próbálkozás, ha csak a hang tér el (a szöveg jó)
 # A "magyarosított" hangminta szövege: természetes, sokféle magyar hangot tartalmazó, kb. 8 mp-es mondat.
 ANCHOR_TEXT = ("Sziasztok! Ma egy nagyon izgalmas dologról szeretnék mesélni nektek, "
                "és remélem, hogy ti is legalább annyira élvezni fogjátok, mint én.")
@@ -286,30 +291,39 @@ class HungarianVoice:
         hyp = " ".join(s.text for s in segs).strip()
         return cer(refs, hyp), hyp
 
-    def synth(self, text, prompt, duration=None, tries=3, seed0=0, refs=None):
-        """A legjobb próbálkozás: (hang, cer, visszahallgatott szöveg, próbák száma).
-        refs: a szöveg írott változatai az ellenőrzéshez (felirat + kiejtés)."""
-        best = None
-        for k in range(tries):
+    def synth(self, text, prompt, duration=None, tries=3, seed0=0, refs=None, voice=None):
+        """A legjobb próbálkozás: (hang, cer, visszahallgatott szöveg, próbák száma, hanghasonlóság vagy None).
+        refs: a szöveg írott változatai az ellenőrzéshez (felirat + kiejtés).
+        voice: fn(hullámforma) -> hasonlóság a szereplő hangmintájához; ha a szöveg jó, de a hang nagyon eltér,
+        legfeljebb VOICE_TRIES plusz próbálkozás jön."""
+        best, best_key = None, None
+        k, limit = 0, tries
+        while k < limit:
             y = self._gen(text, prompt, duration, seed=seed0 + k)
             c, hyp = self._check(y, refs or [text])
-            if best is None or c < best[1]:
-                best = (y, c, hyp, k + 1)
-            if c <= QC_MAX_CER:
+            s = voice(y) if voice is not None and len(y) >= 0.8 * TTS_SR else None
+            ok_text, ok_voice = c <= QC_MAX_CER, s is None or s >= VOICE_MIN
+            key = (ok_text and ok_voice, ok_text, -round(c, 2), 1.0 if s is None else s)
+            if best is None or key > best_key:
+                best, best_key = (y, c, hyp, k + 1, s), key
+            k += 1
+            if ok_text and ok_voice:
                 break
+            if ok_text and limit == tries:
+                limit = max(limit, k + VOICE_TRIES)
         return best
 
-    def synth_fit(self, text, prompt, avail, seed0=0, refs=None):
+    def synth_fit(self, text, prompt, avail, seed0=0, refs=None, voice=None):
         """Természetes tempóban generál; ha nem fér bele az `avail` másodpercbe, legfeljebb
-        MAX_SPEEDUP-szoros gyorsítással újra. -> dict(y, dur, natural, cer, hyp, tries, fits)"""
-        y, c, hyp, n = self.synth(text, prompt, seed0=seed0, refs=refs)
+        MAX_SPEEDUP-szoros gyorsítással újra. -> dict(y, dur, natural, cer, hyp, tries, fits, vsim)"""
+        y, c, hyp, n, s = self.synth(text, prompt, seed0=seed0, refs=refs, voice=voice)
         natural = len(y) / TTS_SR
         if natural > avail + 0.05:
             target = max(avail, natural / MAX_SPEEDUP)
-            y2, c2, hyp2, n2 = self.synth(text, prompt, duration=target, seed0=seed0 + 10, refs=refs)
-            if c2 <= max(QC_MAX_CER, c + 0.05):
-                y, c, hyp, n = y2, c2, hyp2, n + n2
+            y2, c2, hyp2, n2, s2 = self.synth(text, prompt, duration=target, seed0=seed0 + 10, refs=refs, voice=voice)
+            if c2 <= max(QC_MAX_CER, c + 0.05) and (s2 is None or s is None or s2 >= min(s, VOICE_MIN)):
+                y, c, hyp, n, s = y2, c2, hyp2, n + n2, s2
         dur = len(y) / TTS_SR
         # egy kis túlnyúlást a keverés elnyel (a következő sor pár tized mp-cel később indul)
         return {"y": y, "dur": dur, "natural": natural, "cer": c, "hyp": hyp, "tries": n,
-                "fits": dur <= avail + FIT_SLACK}
+                "fits": dur <= avail + FIT_SLACK, "vsim": s}
