@@ -16,6 +16,8 @@ def _run(src, options, job_dir, q, cancel, online=False):
 
     if online:
         os.environ["RKDUB_ONLINE"] = "1"
+    if os.name != "nt":                    # kevesebb töredezettség kis videómemórián (Windowson nem támogatott)
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     offline = use_offline_models()
     from .pipeline import Cancelled, DubJob
 

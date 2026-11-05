@@ -84,15 +84,28 @@ def ensure_ollama(log=print):
     import subprocess
     import time
 
-    app = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama app.exe")
-    exe = shutil.which("ollama") or os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    if os.path.exists(app):
+    quiet = dict(creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.name == "nt":
+        app = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama app.exe")
+        exe = shutil.which("ollama") or os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
+    else:
+        app = ""
+        exe = shutil.which("ollama") or next((p for p in ("/usr/local/bin/ollama", "/usr/bin/ollama",
+                                                          os.path.expanduser("~/.local/bin/ollama")) if os.path.exists(p)), "")
+    if app and os.path.exists(app):
         log("Az Ollama nem fut, elindítom az Ollama alkalmazást...")
-        subprocess.Popen([app], creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    elif os.path.exists(exe):              # alkalmazás nélküli telepítés: a szerver a környezeti változókat használja
+        subprocess.Popen([app], **quiet)
+    elif exe and os.path.exists(exe):
+        # Linuxon az Ollama rendszerint systemd-szolgáltatásként fut, a saját modellmappájával
+        # (/usr/share/ollama). Egy csupasz "ollama serve" a ~/.ollama üres mappáját használná, ezért ilyenkor
+        # nem indítunk saját szervert, csak szólunk.
+        if os.name != "nt" and shutil.which("systemctl") and subprocess.run(
+                ["systemctl", "is-enabled", "--quiet", "ollama"], **quiet).returncode == 0:
+            log("Az Ollama-szolgáltatás nem fut. Indítsd el: sudo systemctl start ollama")
+            return False
         log("Az Ollama nem fut, elindítom...")
-        subprocess.Popen([exe, "serve"], creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen([exe, "serve"], start_new_session=os.name != "nt", **quiet)
     else:
         return False
     for _ in range(120):
@@ -127,10 +140,22 @@ def pick_default_model(models):
 
 def unload_ollama(model):
     """A modell kiürítése a videókártyáról (a hangmodellnek kell a hely)."""
+    import time
+
     try:
         requests.post(OLLAMA_URL + "/api/generate", json={"model": model, "keep_alive": 0}, timeout=30)
     except Exception:
-        pass
+        return
+    # a kérés azonnal visszatér, a modell futtatója csak utána áll le: megvárjuk, különben a rögtön betöltött
+    # hangmodell (kis videókártyán) nem fér el mellette
+    for _ in range(60):
+        try:
+            loaded = requests.get(OLLAMA_URL + "/api/ps", timeout=2).json().get("models") or []
+        except Exception:
+            return
+        if not any(m.get("name") == model or m.get("model") == model for m in loaded):
+            return
+        time.sleep(0.5)
 
 
 # Szinkronfordítói stílus: a leggyakoribb tükörfordítási hibák jó/rossz példákkal (a modellek ezekből

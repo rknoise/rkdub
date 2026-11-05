@@ -2,11 +2,8 @@
 """Grafikus felület (Gradio, a böngészőben vagy Edge-alkalmazásablakban)."""
 
 import os
-import shutil
-import subprocess
 import threading
 import time
-import webbrowser
 
 import gradio as gr
 
@@ -14,7 +11,8 @@ from . import media
 from . import script
 from . import translate as tr
 from .pipeline import DEFAULT_OPTIONS, QC_FLAG, DubJob
-from .util import NO_WINDOW, OUT_DIR, ROOT, WORK_DIR, fmt_time, load_settings, read_json, save_settings
+from .util import OUT_DIR, ROOT, WORK_DIR, fmt_time, load_settings, open_folder, read_json, save_settings
+from .util import browser_open as _browser_open
 from .worker import JobProcess
 
 TRANSLATORS = {"Helyi AI (Ollama)": "ollama", "DeepL": "deepl"}
@@ -228,26 +226,8 @@ class App:
         return msg, gr.update(value=self.table(), visible=True), None
 
 
-def open_folder(path):
-    os.makedirs(path, exist_ok=True)
-    if os.name == "nt":
-        os.startfile(path)   # noqa: S606
-
-
 def browser_open(url):
-    """Edge-alkalmazásablakban nyílik (mint egy önálló program), különben a böngészőben."""
-    for exe in (shutil.which("msedge"),
-                os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-                os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe")):
-        if exe and os.path.exists(exe):
-            try:
-                prof = os.path.join(os.path.expanduser("~"), ".rkdub", "edge")
-                subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={prof}", "--window-size=1400,950",
-                                  "--no-first-run", "--no-default-browser-check"], creationflags=NO_WINDOW)
-                return
-            except OSError:
-                pass
-    webbrowser.open(url)
+    _browser_open(url, "1400,950")
 
 
 CSS = """

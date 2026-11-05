@@ -6,7 +6,6 @@ import io
 import os
 import shutil
 import subprocess
-import sys
 import threading
 import time
 import wave
@@ -20,7 +19,8 @@ from . import __version__, media, script
 from . import translate as tr
 from .pipeline import DEFAULT_OPTIONS, QC_FLAG, DubJob, safe_stem
 from .tts import VOICE_MIN
-from .util import NO_WINDOW, OUT_DIR, ROOT, WORK_DIR, cpu_mode, fmt_time, load_settings, read_json, save_settings
+from .util import (NO_WINDOW, OUT_DIR, ROOT, WORK_DIR, browser_open, cpu_mode, fmt_time, load_settings,
+                   open_folder, pick_media_file, read_json, save_settings)
 from .worker import JobProcess
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -295,14 +295,10 @@ async def api_upload(file: UploadFile = File(...)):
 
 @app.post("/api/browse")
 def api_browse():
-    """Windows fájlválasztó ablak (a szerver a saját gépen fut, így ez a felhasználó gépén nyílik meg)."""
-    exts = " ".join("*" + e for e in sorted(media.VIDEO_EXT | media.AUDIO_EXT))
-    code = ("import tkinter as tk\nfrom tkinter import filedialog\nr=tk.Tk();r.withdraw();r.attributes('-topmost',True)\n"
-            f"p=filedialog.askopenfilename(title='Videó vagy hangfájl kiválasztása',filetypes=[('Videó és hang','{exts}'),"
-            "('Minden fájl','*.*')])\nprint(p or '')")
+    """Fájlválasztó ablak (a szerver a saját gépen fut, így ez a felhasználó gépén nyílik meg)."""
+    exts = ["*" + e for e in sorted(media.VIDEO_EXT | media.AUDIO_EXT)]
     try:
-        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600,
-                             encoding="utf-8", errors="replace", creationflags=NO_WINDOW).stdout.strip()
+        out = pick_media_file(exts)
     except Exception as e:
         raise HTTPException(500, f"a fájlválasztó nem nyílt meg: {e}")
     return {"path": os.path.normpath(out) if out else ""}
@@ -530,16 +526,10 @@ def api_orig_audio():
     return FileResponse(out, media_type="audio/mp4")
 
 
-def _open(path):
-    os.makedirs(path, exist_ok=True)
-    if os.name == "nt":
-        os.startfile(path)   # noqa: S606
-
-
 @app.post("/api/open-folder")
 async def api_open_folder(request: Request):
     which = (await request.json()).get("which")
-    _open(OUT_DIR if which == "out" else WORK_DIR)
+    open_folder(OUT_DIR if which == "out" else WORK_DIR)
     return {"ok": True}
 
 
@@ -561,21 +551,7 @@ def api_work_size():
 
 
 def _browser_open(url):
-    """Edge-alkalmazásablakban nyílik (mint egy önálló program), különben a böngészőben."""
-    import webbrowser
-
-    for exe in (shutil.which("msedge"),
-                os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-                os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe")):
-        if exe and os.path.exists(exe):
-            try:
-                prof = os.path.join(os.path.expanduser("~"), ".rkdub", "edge")
-                subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={prof}", "--window-size=1500,1000",
-                                  "--no-first-run", "--no-default-browser-check"], creationflags=NO_WINDOW)
-                return
-            except OSError:
-                pass
-    webbrowser.open(url)
+    browser_open(url, "1500,1000")
 
 
 def _port_in_use(port):

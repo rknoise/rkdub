@@ -36,6 +36,7 @@ VAD = {"min_silence_duration_ms": 300, "speech_pad_ms": 200}
 def add_nvidia_dll_dirs():
     """A pip-es nvidia-* csomagok DLL-jei (cuBLAS, cuDNN) a ctranslate2-nek."""
     if os.name != "nt":
+        _preload_nvidia_libs()
         return
     for sp in {p for p in sys.path if "site-packages" in p}:
         nv = os.path.join(sp, "nvidia")
@@ -48,6 +49,25 @@ def add_nvidia_dll_dirs():
                 except OSError:
                     pass
                 os.environ["PATH"] = root + os.pathsep + os.environ.get("PATH", "")
+
+
+def _preload_nvidia_libs():
+    """Linuxon a ctranslate2 név szerint tölti be a libcublas.so.12-t és a libcudnn*.so.9-et; az LD_LIBRARY_PATH
+    futás közbeni módosítása erre nem hat. Ha a pip-es nvidia-* csomagokból előre betöltjük őket (RTLD_GLOBAL),
+    a dinamikus betöltő a már betöltött példányt adja, így nem kell rendszerszintű CUDA/cuDNN."""
+    import ctypes
+    import glob
+
+    for sp in {p for p in sys.path if "site-packages" in p}:
+        nv = os.path.join(sp, "nvidia")
+        if not os.path.isdir(nv):
+            continue
+        for pat in ("cublas/lib/libcublasLt.so.*", "cublas/lib/libcublas.so.*", "cudnn/lib/libcudnn*.so.*"):
+            for lib in sorted(glob.glob(os.path.join(nv, pat))):
+                try:
+                    ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+                except OSError:
+                    pass
 
 
 def transcribe(vocals_16k, model_name="large-v3-turbo", language=None, log=print, progress=None):
