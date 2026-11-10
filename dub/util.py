@@ -175,3 +175,66 @@ def log_to_console(msg):
         print(msg, flush=True)
     except Exception:
         sys.stdout.buffer.write((msg + "\n").encode("utf-8", "replace"))
+
+
+# --- platformfüggő segédek (Windows / Linux) ----------------------------------------------
+
+def open_folder(path):
+    """Mappa megnyitása a fájlkezelőben."""
+    os.makedirs(path, exist_ok=True)
+    try:
+        if os.name == "nt":
+            os.startfile(path)   # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+def _app_browsers():
+    """Chromium-alapú böngészők, amelyek "--app" módban önálló ablakként nyitják meg a felületet."""
+    if os.name == "nt":
+        return [shutil.which("msedge"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+                os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe")]
+    return [shutil.which(n) for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+                                      "microsoft-edge", "microsoft-edge-stable", "brave-browser")]
+
+
+def browser_open(url, size="1500,1000"):
+    """Alkalmazásablakban nyílik (mint egy önálló program), különben az alapértelmezett böngészőben."""
+    import webbrowser
+
+    for exe in _app_browsers():
+        if exe and os.path.exists(exe):
+            try:
+                prof = os.path.join(HOME_DIR, "edge" if os.name == "nt" else "browser")
+                subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={prof}", f"--window-size={size}",
+                                  "--no-first-run", "--no-default-browser-check"], creationflags=NO_WINDOW,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                pass
+    webbrowser.open(url)
+
+
+def pick_media_file(exts):
+    """Fájlválasztó ablak; a kiválasztott út, vagy "" (mégse). Linuxon a zenity / kdialog natív ablaka, ha van,
+    különben (és Windowson) a tkinter-é. A tkinter külön folyamatban fut, hogy a szerver szálait ne zavarja."""
+    title = "Videó vagy hangfájl kiválasztása"
+    kw = dict(capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace")
+    if os.name != "nt" and sys.platform != "darwin":
+        if shutil.which("zenity"):
+            p = subprocess.run(["zenity", "--file-selection", f"--title={title}",
+                                f"--file-filter=Videó és hang | {' '.join(exts)}", "--file-filter=Minden fájl | *"], **kw)
+            return p.stdout.strip()
+        if shutil.which("kdialog"):
+            p = subprocess.run(["kdialog", "--title", title, "--getopenfilename", os.path.expanduser("~"),
+                                f"{' '.join(exts)}|Videó és hang"], **kw)
+            return p.stdout.strip()
+    code = ("import tkinter as tk\nfrom tkinter import filedialog\nr=tk.Tk();r.withdraw();r.attributes('-topmost',True)\n"
+            f"p=filedialog.askopenfilename(title={title!r},filetypes=[('Videó és hang',{' '.join(exts)!r}),"
+            "('Minden fájl','*')])\nprint(p or '')")
+    return subprocess.run([sys.executable, "-c", code], creationflags=NO_WINDOW, **kw).stdout.strip()
