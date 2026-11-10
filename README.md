@@ -32,7 +32,7 @@ Behúzol egy angol videót vagy hangfájlt, és a program magyarra szinkronizál
 | Memória (RAM) | 16 GB | 32 GB |
 | Szabad hely | kb. 23 GB | 40 GB, SSD-n |
 | Internet | csak a telepítéshez (kb. 18 GB letöltés) | |
-| Egy végig beszédes 15 perces videó | GTX 10xx-en még nincs mérve | kb. 25–30 perc (RTX 3090) |
+| Egy végig beszédes 15 perces videó | GTX 1080 8gb on kb 3 óra | kb. 25–30 perc (RTX 3090) |
 
 - **A videómemória mérete** a fordítómodellt határozza meg: 24 GB-on gemma3:27b (a legtermészetesebb magyar), 12–16 GB-on 12b, ennél kevesebben 4b. A szinkron többi része 8 GB-ba belefér: mérve a legtöbbet a hangkészítés foglal a visszahallgatással együtt, kb. 6–8 GB-ot. 6 GB-os kártyán nincs kipróbálva.
 - **GTX 10xx (Pascal):** az 1.3.1-től támogatott, a beszédfelismerés ott int8-cal fut. A GTX 9xx és a régebbi kártyákat (pl. **GTX 970**) a mostani PyTorch már nem támogatja, ezeken a telepítő processzoros módot választ.
